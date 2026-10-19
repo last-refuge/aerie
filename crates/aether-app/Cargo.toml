@@ -1,0 +1,18 @@
+[package]
+name = "aether-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aether"
+path = "src/main.rs"
+
+[dependencies]
+adw.workspace = true
+aether-core.workspace = true
+gtk.workspace = true
+
+[lints]
+workspace = true
