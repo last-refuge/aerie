@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"
-repository = "https://github.com/last-refuge/aether"
+repository = "https://github.com/last-refuge/aerie"
 
 [workspace.dependencies]
 adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
