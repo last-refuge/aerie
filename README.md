@@ -8,12 +8,22 @@ The project is in early development. See the [implementation plan](llm-docs/impl
 
 ## Building
 
-Requires Rust 1.85+, GTK 4.16+ and libadwaita 1.6+. On Arch Linux:
+Requires Rust 1.92+, GTK 4.16+ and libadwaita 1.6+. On Arch Linux:
 
 ```sh
 sudo pacman -S --needed gtk4 libadwaita rustup
 cargo run -p aether-app
 ```
+
+## Drive sign-in spike
+
+Create a Desktop app OAuth client in a Google Cloud test project, save its JSON to `~/.config/aether-drive/oauth-client.json`, then run:
+
+```sh
+cargo run -p aether-drive --example drive_spike
+```
+
+It signs in with read-only Drive access, keeps the sign-in in the system keyring, and lists My Drive. Add `-- --sign-out` to remove the stored sign-in.
 
 ## Layout
 
