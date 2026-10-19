@@ -1,23 +1,35 @@
-# Aether — Brand & Creative Direction
+# Aerie — Brand & Creative Direction
 
-Aether is a premium, Linux-native Google Drive experience. The brand should feel elegant, fast, atmospheric, and distinctly modern—more like a beautifully crafted operating-system feature than a conventional cloud-storage utility.
+Aerie is a premium, Linux-native Google Drive experience. The brand should feel elegant, fast, atmospheric, and distinctly modern—more like a beautifully crafted operating-system feature than a conventional cloud-storage utility.
 
 The visual direction establishes the foundation: a luminous, intertwined cloud symbol, deep midnight surfaces, electric blue and violet gradients, restrained typography, and cinematic imagery.
 
 ## 1. Brand identity
 
-- **Product name:** Aether
+- **Product name:** Aerie
 - **Descriptor:** Google Drive for Linux
 - **Primary tagline:** Your files, everywhere.
 - **Brand promise:** Your cloud, at home on Linux.
 
-**Positioning statement:** Aether brings Google Drive into the Linux desktop through an experience that feels native, effortless, and beautifully integrated.
+### Naming and transition
+
+Use **Aerie** in product copy, window titles, onboarding, sign-in pages, documentation, marketing and new logo lockups. Spell it with an initial capital and lowercase remaining letters. The brand color is now named **Aerie Blue**; its hex value remains `#38BDF8`.
+
+This is a name change. The intertwined cloud symbol, palette, typography, taglines, voice and interface principles remain the design direction. All newly produced wordmarks and promotional assets must use Aerie.
+
+The current visual reference is [Aerie Brand Guidelines in Midnight Mode](../Aerie%20Brand%20Guidelines%20in%20Midnight%20Mode.png), with Aerie wordmarks, color naming and interface copy. The original `Aether Brand Guidelines in Midnight Mode.png` is retained as a legacy source; do not publish it as current Aerie branding. These written guidelines remain authoritative for implementation details.
+
+Aerie replaced the earlier name, Aether, which collides with an unrelated Omarchy theming package. Package names, the executable, configuration paths and application IDs all use `aerie`.
+
+### Positioning
+
+**Positioning statement:** Aerie brings Google Drive into the Linux desktop through an experience that feels native, effortless, and beautifully integrated.
 
 The brand should communicate four qualities: speed, seamlessness, precision, and quiet sophistication.
 
 ### Voice and personality
 
-Aether speaks with confidence, clarity, and restraint. Its copy should be concise, technically credible, and approachable.
+Aerie speaks with confidence, clarity, and restraint. Its copy should be concise, technically credible, and approachable.
 
 Examples:
 
@@ -43,7 +55,7 @@ The primary symbol uses a cyan-to-blue-to-violet gradient with subtle luminous h
 
 | Color | Hex |
 | --- | --- |
-| Aether Blue | `#38BDF8` |
+| Aerie Blue | `#38BDF8` |
 | Nebula Purple | `#8B5CF6` |
 | Aurora Cyan | `#06B6D4` |
 | Midnight | `#0B1220` |
@@ -79,7 +91,7 @@ Use slightly tightened tracking on large headlines, comfortable line spacing for
 
 ## 5. Application design language
 
-Aether should feel native to a carefully customized Omarchy desktop without depending on Omarchy-specific visual conventions.
+Aerie should feel native to a carefully customized Omarchy desktop without depending on Omarchy-specific visual conventions.
 
 ### Core interface principles
 
@@ -124,8 +136,8 @@ Keep imagery cinematic but minimal. Never allow elaborate promotional imagery to
 
 ## 8. Brand applications
 
-Aether's visual identity should extend consistently across the website, GitHub repository, application splash screen, system tray, installer, release announcements, and documentation.
+Aerie's visual identity should extend consistently across the website, GitHub repository, application splash screen, system tray, installer, release announcements, and documentation.
 
 For marketing, use dramatic atmospheric compositions with generous whitespace and large typography. For documentation, remove most decorative treatments and prioritize readability, annotated screenshots, and clear technical examples.
 
-For the desktop app, the key test is simple: Aether should look like it belongs on the most thoughtfully designed Linux desktop in the world.
+For the desktop app, the key test is simple: Aerie should look like it belongs on the most thoughtfully designed Linux desktop in the world.

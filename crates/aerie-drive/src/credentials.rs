@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use crate::Result;
 
-const LABEL: &str = "Aether Google Drive sign-in";
+const LABEL: &str = "Aerie Google Drive sign-in";
 
 fn attributes() -> HashMap<&'static str, &'static str> {
     HashMap::from([
-        ("application", "io.github.last_refuge.Aether"),
+        ("application", "io.github.last_refuge.Aerie"),
         ("kind", "google-refresh-token"),
     ])
 }

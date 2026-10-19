@@ -3,35 +3,23 @@
 version = 4
 
 [[package]]
-name = "aes"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
-dependencies = [
- "cfg-if",
- "cipher",
- "cpufeatures 0.2.17",
- "zeroize",
-]
-
-[[package]]
-name = "aether-app"
+name = "aerie-app"
 version = "0.1.0"
 dependencies = [
- "aether-core",
+ "aerie-core",
  "gtk4",
  "libadwaita",
 ]
 
 [[package]]
-name = "aether-core"
+name = "aerie-core"
 version = "0.1.0"
 
 [[package]]
-name = "aether-drive"
+name = "aerie-drive"
 version = "0.1.0"
 dependencies = [
- "aether-core",
+ "aerie-core",
  "oauth2",
  "oo7",
  "reqwest",
@@ -44,17 +32,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "aether-store"
+name = "aerie-store"
 version = "0.1.0"
 dependencies = [
- "aether-core",
+ "aerie-core",
 ]
 
 [[package]]
-name = "aether-sync"
+name = "aerie-sync"
 version = "0.1.0"
 dependencies = [
- "aether-core",
+ "aerie-core",
+]
+
+[[package]]
+name = "aes"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
+dependencies = [
+ "cfg-if",
+ "cipher",
+ "cpufeatures 0.2.17",
+ "zeroize",
 ]
 
 [[package]]

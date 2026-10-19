@@ -1,7 +1,7 @@
 //! OAuth and Google Drive API v3 adapter.
 //!
 //! Every request goes directly from this computer to Google; nothing is routed through an
-//! Aether-hosted service.
+//! Aerie-hosted service.
 
 pub mod api;
 pub mod auth;
@@ -10,9 +10,8 @@ pub mod credentials;
 
 use thiserror::Error;
 
-/// Folder name under the XDG config directory. `aether` is avoided because an unrelated
-/// Omarchy tool already uses `~/.config/aether`.
-pub const CONFIG_DIR_NAME: &str = "aether-drive";
+/// Folder name under the XDG config directory.
+pub const CONFIG_DIR_NAME: &str = "aerie";
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -57,6 +56,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub fn http_client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent(concat!("Aether/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Aerie/", env!("CARGO_PKG_VERSION")))
         .build()?)
 }

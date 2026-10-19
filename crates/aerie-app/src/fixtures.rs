@@ -1,6 +1,6 @@
 //! Sample Drive contents shown until the Drive adapter is connected.
 
-use aether_core::{DriveFileId, FileEntry, FileKind};
+use aerie_core::{DriveFileId, FileEntry, FileKind};
 
 pub const ROOT_ID: &str = "root";
 
@@ -24,7 +24,7 @@ const SAMPLES: &[Sample] = &[
     ("work", ROOT_ID, "Work", FileKind::Folder, None, 19, 9),
     ("personal", ROOT_ID, "Personal", FileKind::Folder, None, 18, 20),
     ("design", ROOT_ID, "Design", FileKind::Folder, None, 18, 14),
-    ("deck", ROOT_ID, "Aether Presentation.pptx", FileKind::Presentation, Some(12_400_000), 17, 16),
+    ("deck", ROOT_ID, "Aerie Presentation.pptx", FileKind::Presentation, Some(12_400_000), 17, 16),
     ("plan", ROOT_ID, "Project Plan.pdf", FileKind::Pdf, Some(8_100_000), 17, 11),
     ("shot", ROOT_ID, "Screenshot.png", FileKind::Image, Some(2_050_000), 17, 10),
     ("budget", ROOT_ID, "Budget 2026.xlsx", FileKind::Spreadsheet, Some(184_000), 12, 15),

@@ -42,7 +42,7 @@ impl OAuthClient {
         Ok(serde_json::from_str::<ClientFile>(json)?.installed)
     }
 
-    /// `$XDG_CONFIG_HOME/aether-drive/oauth-client.json`, falling back to `~/.config`.
+    /// `$XDG_CONFIG_HOME/aerie/oauth-client.json`, falling back to `~/.config`.
     pub fn default_path() -> PathBuf {
         let config = std::env::var_os("XDG_CONFIG_HOME")
             .filter(|dir| !dir.is_empty())

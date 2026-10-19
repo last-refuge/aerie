@@ -21,17 +21,17 @@ pub const DRIVE: &str = "https://www.googleapis.com/auth/drive";
 
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 
-const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Aether</title>\
+const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Aerie</title>\
 <body style=\"font-family:Inter,sans-serif;background:#0b1220;color:#f8fafc;\
 display:grid;place-items:center;height:100vh;margin:0\">\
 <div style=\"text-align:center\"><h1 style=\"font-weight:650\">You're signed in.</h1>\
-<p style=\"color:#94a3b8\">You can close this tab and return to Aether.</p></div>";
+<p style=\"color:#94a3b8\">You can close this tab and return to Aerie.</p></div>";
 
-const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Aether</title>\
+const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Aerie</title>\
 <body style=\"font-family:Inter,sans-serif;background:#0b1220;color:#f8fafc;\
 display:grid;place-items:center;height:100vh;margin:0\">\
 <div style=\"text-align:center\"><h1 style=\"font-weight:650\">Sign-in didn't finish.</h1>\
-<p style=\"color:#94a3b8\">Return to Aether to try again.</p></div>";
+<p style=\"color:#94a3b8\">Return to Aerie to try again.</p></div>";
 
 /// Tokens from a sign-in or refresh. Never log these.
 pub struct Tokens {

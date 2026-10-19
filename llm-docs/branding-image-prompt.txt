@@ -1,0 +1,9 @@
+Tool: built-in image_gen (edit)
+Source: Aether Brand Guidelines in Midnight Mode.png
+Output: Aerie Brand Guidelines in Midnight Mode.png
+
+Use case: text-localization.
+Asset type: existing Linux app brand guidelines board.
+Input image: the provided image is the edit target, not just a style reference.
+Replace every instance of the old product name "Aether" with "Aerie" (exact spelling A-e-r-i-e). Update the large hero wordmark, horizontal logo wordmark, vertical lockup, monochrome wordmark, the opening word of the brand-story paragraph, palette label "Aether Blue" to "Aerie Blue", secondary button "Open Aether" to "Open Aerie", app mockup title and its file name "Aether Presentation.pptx" to "Aerie Presentation.pptx". Search the entire board for any other old-name instances and replace them.
+Preserve the original composition, panel grid, dimensions/aspect ratio, typography, text sizes and alignment, cloud symbols, icon variations, luminous cyan/blue/violet gradients, midnight backgrounds, mountains/cloud photography, hardware imagery, all other labels, hex values and UI content. No redesign, no added elements, no changed slogans. Keep "GOOGLE DRIVE FOR LINUX" and "Your files, everywhere." exactly. Make all replacement text crisp and natural, fitting each existing placement. Opaque background.
