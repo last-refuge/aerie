@@ -4,7 +4,7 @@
 
 ## What the spike shows
 
-A libadwaita window with a collapsible sidebar, a virtualized and sortable `ColumnView` file list, breadcrumbs, filename search, an empty state and an alert dialog, all over sample data. Navigation and search logic live in `aether-core` (`BrowseState`) with unit tests; the GTK layer only renders it.
+A libadwaita window with a collapsible sidebar, a virtualized and sortable `ColumnView` file list, breadcrumbs, filename search, an empty state and an alert dialog, all over sample data. Navigation and search logic live in `aerie-core` (`BrowseState`) with unit tests; the GTK layer only renders it.
 
 ## Findings
 

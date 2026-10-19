@@ -1,4 +1,4 @@
-/* Aether design tokens and component styles. The tokens here are the light palette,
+/* Aerie design tokens and component styles. The tokens here are the light palette,
    derived from the dark brand baseline in style-dark.css. */
 
 /* libadwaita derives some accent variables from these named colors. */
@@ -7,8 +7,8 @@
 @define-color accent_color #0369a1;
 
 :root {
-  --aether-secondary-fg-color: #475569;
-  --aether-primary-gradient: linear-gradient(90deg, #0369a1, #4338ca 40%, #6d28d9 75%, #0e7490);
+  --aerie-secondary-fg-color: #475569;
+  --aerie-primary-gradient: linear-gradient(90deg, #0369a1, #4338ca 40%, #6d28d9 75%, #0e7490);
 
   --accent-bg-color: #0369a1;
   --accent-fg-color: #f8fafc;
@@ -37,7 +37,7 @@ window {
 
 .metadata {
   font-size: 12px;
-  color: var(--aether-secondary-fg-color);
+  color: var(--aerie-secondary-fg-color);
 }
 
 .technical {
@@ -61,23 +61,23 @@ button {
   font-weight: 700;
 }
 
-.aether-welcome statuspage .title {
+.aerie-welcome statuspage .title {
   font-size: 32px;
   font-weight: 700;
 }
 
-.aether-primary {
-  background-image: var(--aether-primary-gradient);
+.aerie-primary {
+  background-image: var(--aerie-primary-gradient);
   color: #f8fafc;
   padding: 10px 24px;
   font-weight: 600;
 }
 
-.aether-primary:hover {
+.aerie-primary:hover {
   filter: brightness(1.1);
 }
 
-.aether-primary:active {
+.aerie-primary:active {
   filter: brightness(0.92);
 }
 
@@ -94,7 +94,7 @@ button {
 
 .breadcrumbs button {
   font-weight: 400;
-  color: var(--aether-secondary-fg-color);
+  color: var(--aerie-secondary-fg-color);
 }
 
 .breadcrumbs .current {
@@ -103,12 +103,12 @@ button {
   font-weight: 600;
 }
 
-.aether-files .file-icon.folder {
+.aerie-files .file-icon.folder {
   color: var(--accent-color);
 }
 
-.aether-files > header > button,
-.aether-files > header > button label {
+.aerie-files > header > button,
+.aerie-files > header > button label {
   font-size: 12px;
-  color: var(--aether-secondary-fg-color);
+  color: var(--aerie-secondary-fg-color);
 }

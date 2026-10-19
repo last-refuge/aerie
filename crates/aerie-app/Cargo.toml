@@ -1,12 +1,19 @@
 [package]
-name = "aether-core"
+name = "aerie-app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "aerie"
+path = "src/main.rs"
+
 [dependencies]
+adw.workspace = true
+aerie-core.workspace = true
+gtk.workspace = true
 
 [lints]
 workspace = true

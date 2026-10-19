@@ -11,10 +11,10 @@ repository = "https://github.com/last-refuge/aether"
 
 [workspace.dependencies]
 adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
-aether-core = { path = "crates/aether-core" }
-aether-drive = { path = "crates/aether-drive" }
-aether-store = { path = "crates/aether-store" }
-aether-sync = { path = "crates/aether-sync" }
+aerie-core = { path = "crates/aerie-core" }
+aerie-drive = { path = "crates/aerie-drive" }
+aerie-store = { path = "crates/aerie-store" }
+aerie-sync = { path = "crates/aerie-sync" }
 gtk = { package = "gtk4", version = "0.11", features = ["v4_16"] }
 oauth2 = "5"
 oo7 = "0.6"

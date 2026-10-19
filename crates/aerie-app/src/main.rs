@@ -1,4 +1,4 @@
-//! Aether desktop application.
+//! Aerie desktop application.
 
 mod browser;
 mod fixtures;
@@ -6,9 +6,10 @@ mod fixtures;
 use adw::prelude::*;
 use gtk::{gdk, glib};
 
-const APP_ID: &str = "io.github.last_refuge.Aether";
+const APP_ID: &str = "io.github.last_refuge.Aerie";
 
 fn main() -> glib::ExitCode {
+    glib::set_application_name("Aerie");
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_startup(|app| {
         // The brand is dark-first; an explicit system preference still wins.

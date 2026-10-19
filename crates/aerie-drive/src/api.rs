@@ -1,6 +1,6 @@
 //! Drive API v3 requests used by the browser.
 
-use aether_core::{DriveFileId, FileEntry, FileKind};
+use aerie_core::{DriveFileId, FileEntry, FileKind};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;

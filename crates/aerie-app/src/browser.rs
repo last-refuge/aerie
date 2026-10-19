@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use aether_core::{BrowseState, DriveFileId, FileEntry, FileKind, compare_names, format_size};
+use aerie_core::{BrowseState, DriveFileId, FileEntry, FileKind, compare_names, format_size};
 use gtk::{gio, glib};
 
 use crate::fixtures::{self, ROOT_ID};
@@ -13,7 +13,7 @@ use crate::fixtures::{self, ROOT_ID};
 pub fn build_window(app: &adw::Application) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Aether")
+        .title("Aerie")
         .default_width(1080)
         .default_height(700)
         .width_request(360)
@@ -71,7 +71,7 @@ fn welcome_page(stack: &gtk::Stack) -> gtk::Widget {
     let connect = gtk::Button::builder()
         .label("Explore sample files")
         .halign(gtk::Align::Center)
-        .css_classes(["aether-primary"])
+        .css_classes(["aerie-primary"])
         .build();
     connect.connect_clicked(glib::clone!(
         #[weak]
@@ -91,7 +91,7 @@ fn welcome_page(stack: &gtk::Stack) -> gtk::Widget {
     actions.append(&note);
 
     let status = adw::StatusPage::builder()
-        .title("Aether")
+        .title("Aerie")
         .description("Your cloud, at home on Linux.")
         .child(&actions)
         .build();
@@ -99,7 +99,7 @@ fn welcome_page(stack: &gtk::Stack) -> gtk::Widget {
     let view = adw::ToolbarView::new();
     view.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
     view.set_content(Some(&status));
-    view.add_css_class("aether-welcome");
+    view.add_css_class("aerie-welcome");
     connect.grab_focus();
     view.upcast()
 }
@@ -124,7 +124,7 @@ impl Browser {
         let view = gtk::ColumnView::builder()
             .model(&selection)
             .reorderable(false)
-            .css_classes(["aether-files"])
+            .css_classes(["aerie-files"])
             .build();
 
         let name = column(
@@ -253,7 +253,7 @@ impl Browser {
         content.set_content(Some(&body));
 
         adw::NavigationSplitView::builder()
-            .sidebar(&adw::NavigationPage::new(&self.sidebar(), "Aether"))
+            .sidebar(&adw::NavigationPage::new(&self.sidebar(), "Aerie"))
             .content(&adw::NavigationPage::new(&content, "My Drive"))
             .min_sidebar_width(200.0)
             .max_sidebar_width(260.0)
@@ -300,7 +300,7 @@ impl Browser {
         body.append(&status);
 
         let title = gtk::Label::builder()
-            .label("Aether")
+            .label("Aerie")
             .css_classes(["brand-title"])
             .build();
         let view = adw::ToolbarView::new();

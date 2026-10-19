@@ -1,13 +1,13 @@
 //! Phase 0 spike: sign in to Google Drive (read-only), keep the sign-in in the system
 //! keyring, and list My Drive.
 //!
-//! cargo run -p aether-drive --example drive_spike [-- --sign-out]
+//! cargo run -p aerie-drive --example drive_spike [-- --sign-out]
 
-use aether_core::{DriveFileId, FileKind, format_size};
-use aether_drive::api::DriveApi;
-use aether_drive::auth::{self, DRIVE_READONLY, Tokens};
-use aether_drive::client::OAuthClient;
-use aether_drive::{credentials, http_client};
+use aerie_core::{DriveFileId, FileKind, format_size};
+use aerie_drive::api::DriveApi;
+use aerie_drive::auth::{self, DRIVE_READONLY, Tokens};
+use aerie_drive::client::OAuthClient;
+use aerie_drive::{credentials, http_client};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     files.sort_by(|a, b| {
         b.is_folder()
             .cmp(&a.is_folder())
-            .then_with(|| aether_core::compare_names(&a.name, &b.name))
+            .then_with(|| aerie_core::compare_names(&a.name, &b.name))
     });
     println!("My Drive: {} items", files.len());
     for file in &files {

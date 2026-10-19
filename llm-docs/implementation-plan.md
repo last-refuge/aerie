@@ -1,8 +1,10 @@
-# Aether implementation plan
+# Aerie implementation plan
 
 **Status:** Proposed implementation roadmap; no application code exists yet.
 **Prepared:** October 19, 2026.
-**Design authority:** [Aether brand guidelines](brand-guidelines.md).
+**Design authority:** [Aerie brand guidelines](brand-guidelines.md).
+
+**Naming:** The product was renamed from Aether to Aerie on October 19, 2026, because Omarchy ships an unrelated `aether` package that installs `/usr/bin/aether` and uses `~/.config/aether`. Crates, the executable, configuration paths, CSS identifiers and application/credential IDs all use `aerie`. Update external branding, such as the Google OAuth consent screen, to Aerie.
 
 ## 1. Product outcome and assumptions
 
@@ -31,31 +33,31 @@ Do not imply that cached metadata means file contents are available offline. Do 
 
 ### Required on-device data boundary
 
-All Aether processing of Google Drive access and data must run on the user's computer. The only remote services involved in authentication and Drive operations are Google's own authorization and Drive services, contacted directly from that computer. This does not mean files cease to exist in Google Drive: Google remains the remote source and sync destination.
+All Aerie processing of Google Drive access and data must run on the user's computer. The only remote services involved in authentication and Drive operations are Google's own authorization and Drive services, contacted directly from that computer. This does not mean files cease to exist in Google Drive: Google remains the remote source and sync destination.
 
 ```text
 User's computer                                  Google services
   System browser + local OAuth callback  <----->  Google authorization
-  Aether UI + local sync service          <----->  Google Drive API/content
+  Aerie UI + local sync service          <----->  Google Drive API/content
   Credential store, SQLite, index, files
 
-Aether hosting: public website, documentation and release artifacts only;
+Aerie hosting: public website, documentation and release artifacts only;
 no access to Google credentials or Drive data.
 ```
 
-- Perform authorization-code exchange, token refresh and revocation locally against Google. Never route authentication through an Aether-hosted callback, token broker or API proxy.
+- Perform authorization-code exchange, token refresh and revocation locally against Google. Never route authentication through an Aerie-hosted callback, token broker or API proxy.
 - Keep access/refresh tokens, OAuth codes and PKCE material local except for their required exchange with Google. Store long-lived credentials in the local system credential service; do not upload credential backups.
 - Keep file contents, names, IDs, folder trees, permissions, account metadata, thumbnails, previews, search indexes, change cursors and transfer/session state local except for direct Google requests. Generate previews and search indexes on-device; do not use hosted indexing, conversion, AI or preview services.
-- Run `aether-service` exclusively on the same computer as the UI. Use same-user local IPC; expose no remote control endpoint or hosted sync worker. A loopback OAuth listener is temporary and local, not an Aether cloud service.
+- Run `aerie-service` exclusively on the same computer as the UI. Use same-user local IPC; expose no remote control endpoint or hosted sync worker. A loopback OAuth listener is temporary and local, not an Aerie cloud service.
 - Keep diagnostics and crash artifacts local. Provide only a locally generated, redacted diagnostic export with no automatic upload. Never include tokens, file contents or Drive-identifying metadata in a support bundle intended for external sharing.
-- Keep public website, documentation, release downloads and any future update checks independent of Google accounts. They must receive no Google credentials, Drive identifiers, filenames or content, including through URLs, query parameters or logs. Package downloads do not require an Aether account.
-- Opening a file in Drive or a Google editor launches Google's URL directly in the user's browser. Local open/reveal operations use desktop integrations without an Aether relay.
+- Keep public website, documentation, release downloads and any future update checks independent of Google accounts. They must receive no Google credentials, Drive identifiers, filenames or content, including through URLs, query parameters or logs. Package downloads do not require an Aerie account.
+- Opening a file in Drive or a Google editor launches Google's URL directly in the user's browser. Local open/reveal operations use desktop integrations without an Aerie relay.
 
 These constraints apply to later releases as well as the first release. A feature requiring hosted access to Drive data requires an explicit change to this product requirement and a fresh Google verification/assessment review before implementation.
 
 ### Application layers
 
-Use Rust for the application and sync engine, with GTK4 through gtk-rs and libadwaita for native controls and window structure. gtk-rs supplies Rust bindings for GTK4 and the underlying GNOME libraries. This recommendation favors native interaction and existing widget accessibility; Phase 0 must prove that Aether's styling can be implemented without fragile overrides. [gtk-rs documentation](https://gtk-rs.org/)
+Use Rust for the application and sync engine, with GTK4 through gtk-rs and libadwaita for native controls and window structure. gtk-rs supplies Rust bindings for GTK4 and the underlying GNOME libraries. This recommendation favors native interaction and existing widget accessibility; Phase 0 must prove that Aerie's styling can be implemented without fragile overrides. [gtk-rs documentation](https://gtk-rs.org/)
 
 | Layer | Responsibility | Proposed approach |
 | --- | --- | --- |
@@ -68,18 +70,18 @@ Use Rust for the application and sync engine, with GTK4 through gtk-rs and libad
 
 Keep network requests, database work, hashing and filesystem scans off the GTK main thread. Deliver bounded, coalesced updates to the UI so a busy queue does not flood rendering. Choose and pin compatible stable dependency versions during the initial spike.
 
-Start with one application process and background worker tasks. Before shipping sync, separate the engine into a per-user `aether-service` process with a documented local IPC interface. The service owns the database and queue; the UI sends commands and subscribes to events. Enforce single ownership, restrict IPC to the current user, version the protocol, and surface version mismatch clearly. Closing a window must not accidentally terminate opted-in background sync; an explicit “Quit Aether” action must describe whether it also stops sync.
+Start with one application process and background worker tasks. Before shipping sync, separate the engine into a per-user `aerie-service` process with a documented local IPC interface. The service owns the database and queue; the UI sends commands and subscribes to events. Enforce single ownership, restrict IPC to the current user, version the protocol, and surface version mismatch clearly. Closing a window must not accidentally terminate opted-in background sync; an explicit “Quit Aerie” action must describe whether it also stops sync.
 
 ### Proposed repository layout
 
 ```text
 crates/
-  aether-app/       # GTK application, views and components
-  aether-core/      # Shared domain models and commands
-  aether-drive/     # OAuth and Drive API adapter
-  aether-sync/      # Reconciliation and transfer scheduling
-  aether-store/     # SQLite schema and migrations
-  aether-service/   # Background process and IPC, introduced before sync release
+  aerie-app/       # GTK application, views and components
+  aerie-core/      # Shared domain models and commands
+  aerie-drive/     # OAuth and Drive API adapter
+  aerie-sync/      # Reconciliation and transfer scheduling
+  aerie-store/     # SQLite schema and migrations
+  aerie-service/   # Background process and IPC, introduced before sync release
 assets/
   branding/        # Approved logo variants and application icons
   icons/           # Lucide UI assets and symbolic tray icons
@@ -102,7 +104,7 @@ Create one semantic token system consumed by all components. The following value
 | Window / sidebar / panel | `#0B1220` / `#101B2D` / `#1E293B` |
 | Subtle border | `#334155` at 50% opacity; increase contrast where needed for usability |
 | Primary / secondary text | Snow `#F8FAFC` / Mist `#94A3B8` |
-| Brand accents | Aether Blue `#38BDF8`, Nebula Purple `#8B5CF6`, Aurora Cyan `#06B6D4` |
+| Brand accents | Aerie Blue `#38BDF8`, Nebula Purple `#8B5CF6`, Aurora Cyan `#06B6D4` |
 | Signature gradient | Blue → indigo → violet → cyan; indigo stop and positions require design selection |
 | Visual balance | Approximately 75% neutral surfaces, 15% type/structure, 10% accents |
 | Font families | Inter for interface text; JetBrains Mono for paths and technical details |
@@ -115,7 +117,7 @@ Implement semantic colors for selection, focus, disabled controls, success, warn
 
 Provide System, Dark and Light appearance settings and an accent preference with system/default and user overrides. Prefer the dark brand appearance when no system preference exists. Keep the logo gradient consistent while allowing control accents to change. Libadwaita documents dark/light appearance, accents and high contrast; custom styles must preserve these behaviors. Validate against the pinned stable release rather than assuming every API in development documentation is available. [Libadwaita styles and appearance](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/styles-and-appearance.html)
 
-Use the supplied brand image as a visual reference. Prepare production assets separately: standalone cloud symbol, horizontal logo, vertical lockup, monochrome mark and size-appropriate application/tray icons. Maintain clear space and avoid busy backdrops. Check asset and font licenses before distribution.
+Use [Aerie Brand Guidelines in Midnight Mode](../Aerie%20Brand%20Guidelines%20in%20Midnight%20Mode.png) as the current visual reference for composition, colors and wordmarks. Prepare individual production assets with the Aerie name: standalone cloud symbol, horizontal logo, vertical lockup, monochrome mark and size-appropriate application/tray icons. Maintain clear space and avoid busy backdrops. Check asset and font licenses before distribution.
 
 ### Screen and interaction plan
 
@@ -146,14 +148,14 @@ Use a separate test project and disposable test account for development. Documen
 
 For the planned file-management and bidirectional sync release, request **`https://www.googleapis.com/auth/drive`**. This is a **restricted** scope, justified by reading and modifying existing My Drive files. Do not also request redundant Drive scopes or unrelated Workspace scopes.
 
-| Scope suffix under `https://www.googleapis.com/auth/` | Google classification | Aether use |
+| Scope suffix under `https://www.googleapis.com/auth/` | Google classification | Aerie use |
 | --- | --- | --- |
 | `drive` | Restricted | Planned production scope for full browsing, transfers, edits, moves, trash and bidirectional sync |
 | `drive.readonly` | Restricted | Use for the read-only development milestone, or a separately shipped read-only product; insufficient for writes |
 | `drive.metadata.readonly` | Restricted | Metadata-only access; insufficient for content downloads or sync and unnecessary alongside `drive` |
 | `drive.file` | Non-sensitive | App-created or explicitly shared files; insufficient for the planned general existing-Drive browser and sync |
 
-The classifications and access boundaries above come from [Google's Drive scope documentation](https://developers.google.com/workspace/drive/api/guides/api-specific-auth). Google lists backup and sync as a permitted restricted-scope use case. Folder selection inside Aether limits what Aether synchronizes; it does not narrow the account-wide OAuth grant. Explain this distinction in onboarding. The broad grant can permit actions beyond Aether's exposed UI; enforce the product's no-permanent-deletion rule in application code.
+The classifications and access boundaries above come from [Google's Drive scope documentation](https://developers.google.com/workspace/drive/api/guides/api-specific-auth). Google lists backup and sync as a permitted restricted-scope use case. Folder selection inside Aerie limits what Aerie synchronizes; it does not narrow the account-wide OAuth grant. Explain this distinction in onboarding. The broad grant can permit actions beyond Aerie's exposed UI; enforce the product's no-permanent-deletion rule in application code.
 
 Use only the access required by the implemented milestone. When moving from a read-only grant to write-capable features, obtain a new consent grant for `drive` and verify the returned scopes before enabling writes. Do not assume a previous token gains permissions when Cloud Console configuration changes. Google does not support incremental authorization for installed apps; test the new authorization flow explicitly. [Desktop OAuth guidance](https://developers.google.com/identity/protocols/oauth2/native-app)
 
@@ -161,21 +163,21 @@ Use only the access required by the implemented milestone. When moving from a re
 
 **Policy baseline checked October 19, 2026; recheck before submission.** Distinguish Google OAuth approval from an independent security assessment:
 
-| Requirement | Expected treatment for Aether |
+| Requirement | Expected treatment for Aerie |
 | --- | --- |
 | Brand verification | Required for the intended public distribution: consistent app identity, controlled domain, public homepage, privacy policy and support contacts |
 | Restricted-scope verification | Required for the intended public distribution using `drive`; justify why `drive.file` cannot support the implemented features |
 | Independent CASA security assessment | Google's criteria require assessment for restricted data accessible from or through a third-party server. The on-device architecture is intended to avoid that condition; confirm Google's determination during review |
 | Recurring assessment | If Google determines an assessment is required, plan for its applicable CASA process and at least annual reassessment; do not treat approval as a one-time certification |
 
-Google's restricted-scope guidance ties the third-party assessment to server access or the capability for that access. **Our expectation that Aether will not need an outside assessment is an architectural inference, not an approved exemption.** Record Google's determination and any conditions before public release. Do not book an assessor or claim certification based solely on the scope classification. [Restricted-scope verification and assessment criteria](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+Google's restricted-scope guidance ties the third-party assessment to server access or the capability for that access. **Our expectation that Aerie will not need an outside assessment is an architectural inference, not an approved exemption.** Record Google's determination and any conditions before public release. Do not book an assessor or claim certification based solely on the scope classification. [Restricted-scope verification and assessment criteria](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
 
 Prepare the following verification package during development and complete it once the requested features can be demonstrated:
 
 1. A production Google Cloud project with a Desktop OAuth client, accurate branding and a verified owned domain, separate from development/testing.
 2. A public homepage, privacy policy and support contact describing direct Google access, local storage, disconnection, local-data removal and applicable Limited Use commitments.
 3. A feature-to-scope justification and demonstration video showing the consent flow and actual use of the requested restricted scope.
-4. A data-flow diagram and endpoint inventory covering login, refresh, sync, previews, diagnostics and distribution, with evidence that Aether hosting cannot access Drive credentials or data.
+4. A data-flow diagram and endpoint inventory covering login, refresh, sync, previews, diagnostics and distribution, with evidence that Aerie hosting cannot access Drive credentials or data.
 5. Google's verification outcome and assessment determination, retained with the release records. Resolve follow-up requests and any required assessment before public distribution.
 
 Google permits development/testing and certain personal-use exceptions to verification. Use explicitly configured test users during development and account for warning screens, user limits and limited refresh-token lifetimes; these exceptions are not the public-launch strategy. Submit production review when the implemented functionality and evidence are ready, starting preparation in Phase 0. [Verification preparation and exceptions](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
@@ -221,7 +223,7 @@ Google-native documents remain browser-openable items in the app; exclude one-wa
 - Test remote overwrite races and duplicate-name mappings; document supported protection and remaining limitations.
 - Record architecture decisions for UI toolkit, sync semantics, background lifecycle and initial package format. Document the accepted on-device boundary, milestone scopes and endpoint inventory; start preparing the Google verification package.
 
-**Exit:** A working technical spike and written decisions demonstrate a viable native UI and direct Drive connection. Review network destinations and credential storage to confirm that no Aether-hosted or other third-party service receives Google credentials or Drive data. Any unresolved data-integrity limitation has a concrete mitigation before sync implementation begins.
+**Exit:** A working technical spike and written decisions demonstrate a viable native UI and direct Drive connection. Review network destinations and credential storage to confirm that no Aerie-hosted or other third-party service receives Google credentials or Drive data. Any unresolved data-integrity limitation has a concrete mitigation before sync implementation begins.
 
 ### Phase 1 — Foundation and branded shell
 
@@ -306,7 +308,7 @@ Use unit tests for reconciliation decisions and path mapping, adapter contract t
 | Decision | Default direction | Resolve by |
 | --- | --- | --- |
 | UI toolkit and branding feasibility | Rust + GTK4/libadwaita with semantic styling | Phase 0 exit |
-| Public OAuth project ownership and verification | Dedicated Aether project; `drive` for the write-capable release; complete brand and restricted-scope review | Prepare in Phase 0; complete before public release |
+| Public OAuth project ownership and verification | Dedicated Aerie project; `drive` for the write-capable release; complete brand and restricted-scope review | Prepare in Phase 0; complete before public release |
 | Google's security-assessment determination | Present evidence of direct, on-device access; expect no server-triggered assessment, subject to Google's review | Confirm and satisfy any requirement before public release |
 | Conditional overwrite guarantees | Test the actual API behavior; preserve versions when uncertain | Before Phase 4 |
 | Light palette and accessible status colors | Derive from the brand and validate visually | Phase 1 exit |
