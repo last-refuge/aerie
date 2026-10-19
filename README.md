@@ -8,7 +8,7 @@ The project is in early development. See the [implementation plan](llm-docs/impl
 
 ## Building
 
-Requires Rust 1.85+, GTK 4.14+ and libadwaita 1.5+. On Arch Linux:
+Requires Rust 1.85+, GTK 4.16+ and libadwaita 1.6+. On Arch Linux:
 
 ```sh
 sudo pacman -S --needed gtk4 libadwaita rustup

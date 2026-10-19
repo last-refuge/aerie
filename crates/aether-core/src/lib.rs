@@ -1,6 +1,12 @@
 //! Shared domain models and commands, independent of GTK and HTTP.
 
+mod browse;
+mod files;
+
 use std::fmt;
+
+pub use browse::{BrowseState, compare_names};
+pub use files::{FileEntry, FileKind, format_size};
 
 /// Stable Google Drive file identifier. Records are keyed by this, never by display name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
