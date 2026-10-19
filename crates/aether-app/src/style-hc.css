@@ -1,0 +1,5 @@
+/* High-contrast adjustments, loaded while the system requests more contrast. */
+
+:root {
+  --border-color: #94a3b8;
+}

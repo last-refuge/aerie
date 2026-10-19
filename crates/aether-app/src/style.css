@@ -1,0 +1,114 @@
+/* Aether design tokens and component styles. The tokens here are the light palette,
+   derived from the dark brand baseline in style-dark.css. */
+
+/* libadwaita derives some accent variables from these named colors. */
+@define-color accent_bg_color #0369a1;
+@define-color accent_fg_color #f8fafc;
+@define-color accent_color #0369a1;
+
+:root {
+  --aether-secondary-fg-color: #475569;
+  --aether-primary-gradient: linear-gradient(90deg, #0369a1, #4338ca 40%, #6d28d9 75%, #0e7490);
+
+  --accent-bg-color: #0369a1;
+  --accent-fg-color: #f8fafc;
+  --accent-color: #0369a1;
+
+  --window-bg-color: #f8fafc;
+  --window-fg-color: #0b1220;
+  --view-bg-color: #f8fafc;
+  --view-fg-color: #0b1220;
+  --headerbar-bg-color: #f8fafc;
+  --headerbar-fg-color: #0b1220;
+  --sidebar-bg-color: #eef2f7;
+  --sidebar-fg-color: #0b1220;
+  --card-bg-color: #ffffff;
+  --card-fg-color: #0b1220;
+  --dialog-bg-color: #ffffff;
+  --dialog-fg-color: #0b1220;
+  --popover-bg-color: #ffffff;
+  --popover-fg-color: #0b1220;
+  --border-color: alpha(#94a3b8, 0.5);
+}
+
+window {
+  font-family: "Inter", sans-serif;
+}
+
+.metadata {
+  font-size: 12px;
+  color: var(--aether-secondary-fg-color);
+}
+
+.technical {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+button {
+  border-radius: 10px;
+}
+
+.card {
+  border-radius: 12px;
+}
+
+/* Brand surfaces */
+
+.brand-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.aether-welcome statuspage .title {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.aether-primary {
+  background-image: var(--aether-primary-gradient);
+  color: #f8fafc;
+  padding: 10px 24px;
+  font-weight: 600;
+}
+
+.aether-primary:hover {
+  filter: brightness(1.1);
+}
+
+.aether-primary:active {
+  filter: brightness(0.92);
+}
+
+/* Browser */
+
+.sync-status {
+  margin: 12px;
+  padding: 12px;
+}
+
+.breadcrumbs {
+  padding: 8px 12px;
+}
+
+.breadcrumbs button {
+  font-weight: 400;
+  color: var(--aether-secondary-fg-color);
+}
+
+.breadcrumbs .current {
+  padding: 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.aether-files .file-icon.folder {
+  color: var(--accent-color);
+}
+
+.aether-files > header > button,
+.aether-files > header > button label {
+  font-size: 12px;
+  color: var(--aether-secondary-fg-color);
+}
