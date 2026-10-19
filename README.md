@@ -24,3 +24,7 @@ cargo run -p aether-app
 | `aether-drive` | OAuth and Drive API adapter |
 | `aether-sync` | Reconciliation and transfer scheduling |
 | `aether-store` | SQLite schema and migrations |
+
+## License
+
+[MIT](LICENSE)
