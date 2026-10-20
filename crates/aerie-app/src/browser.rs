@@ -1574,8 +1574,7 @@ impl Browser {
         let crumb_mark = self.mark(state.catalog(), state.current_folder());
         drop(state);
         self.crumb_mark.set(crumb_mark);
-        self.store.remove_all();
-        self.store.extend_from_slice(&items);
+        self.replace_rows(&items);
 
         if items.is_empty() {
             self.show_empty(searching);
@@ -1585,6 +1584,36 @@ impl Browser {
         }
         self.rebuild_breadcrumbs(searching);
         self.update_actions();
+    }
+
+    /// Swaps in new rows, touching only the run that changed. The list refreshes after
+    /// every page of an index, and replacing everything would drop the selection, close
+    /// the context menu and scroll back to the top.
+    fn replace_rows(&self, items: &[glib::BoxedAnyObject]) {
+        let current: Vec<glib::Object> = (0..self.store.n_items())
+            .filter_map(|position| self.store.item(position))
+            .collect();
+        let same = |old: &glib::Object, new: &glib::BoxedAnyObject| {
+            let (old, new) = (row_of(old), new.borrow::<Row>());
+            old.entry == new.entry && old.mark == new.mark
+        };
+        let prefix = current
+            .iter()
+            .zip(items)
+            .take_while(|(old, new)| same(old, new))
+            .count();
+        let suffix = current[prefix..]
+            .iter()
+            .rev()
+            .zip(items[prefix..].iter().rev())
+            .take_while(|(old, new)| same(old, new))
+            .count();
+        let removed = current.len() - prefix - suffix;
+        let added = &items[prefix..items.len() - suffix];
+        if removed == 0 && added.is_empty() {
+            return;
+        }
+        self.store.splice(prefix as u32, removed as u32, added);
     }
 
     /// An unfinished inventory must never look like an empty Drive.
