@@ -25,6 +25,8 @@ cargo run -p aerie-drive --example drive_spike
 
 It signs in with read-only Drive access, keeps the sign-in in the system keyring, and lists My Drive. Add `-- --watch` to keep following changes, or `-- --sign-out` to remove the stored sign-in.
 
+To try writes safely, `cargo run -p aerie-drive --example write_spike` signs in with access only to files Aerie creates, and runs upload and overwrite tests in an "Aerie test" folder.
+
 ## Layout
 
 | Crate | Responsibility |

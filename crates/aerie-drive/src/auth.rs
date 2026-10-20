@@ -16,6 +16,9 @@ use crate::{Error, Result};
 
 /// Read-only Drive access, used until write features exist.
 pub const DRIVE_READONLY: &str = "https://www.googleapis.com/auth/drive.readonly";
+/// Only files Aerie creates or the user opens with it. Used for write tests on a real
+/// account, where the rest of the Drive must stay out of reach.
+pub const DRIVE_FILE: &str = "https://www.googleapis.com/auth/drive.file";
 /// Full Drive access for transfers, file actions and sync.
 pub const DRIVE: &str = "https://www.googleapis.com/auth/drive";
 
