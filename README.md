@@ -23,7 +23,7 @@ Create a Desktop app OAuth client in a Google Cloud test project, save its JSON 
 cargo run -p aerie-drive --example drive_spike
 ```
 
-It signs in with read-only Drive access, keeps the sign-in in the system keyring, and lists My Drive. Add `-- --sign-out` to remove the stored sign-in.
+It signs in with read-only Drive access, keeps the sign-in in the system keyring, and lists My Drive. Add `-- --watch` to keep following changes, or `-- --sign-out` to remove the stored sign-in.
 
 ## Layout
 
