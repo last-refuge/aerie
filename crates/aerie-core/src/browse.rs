@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use crate::{DriveFileId, FileEntry};
+use crate::{Change, DriveFileId, FileEntry};
 
 /// What the browser shows: the open folder path and an optional filename query.
 #[derive(Debug)]
@@ -69,6 +69,28 @@ impl BrowseState {
 
     pub fn add(&mut self, entry: FileEntry) {
         self.entries.push(entry);
+    }
+
+    /// Applies a remote change to the cached entries and the open path.
+    pub fn apply(&mut self, change: Change) {
+        match change {
+            Change::Upsert(entry) => {
+                for folder in self.path.iter_mut().filter(|f| f.id == entry.id) {
+                    *folder = entry.clone();
+                }
+                match self.entries.iter_mut().find(|e| e.id == entry.id) {
+                    Some(existing) => *existing = entry,
+                    None => self.entries.push(entry),
+                }
+            }
+            Change::Removed(id) => {
+                self.entries.retain(|e| e.id != id);
+                // Leave a folder that no longer exists, returning to its parent.
+                if let Some(depth) = self.path.iter().position(|f| f.id == id) {
+                    self.path.truncate(depth);
+                }
+            }
+        }
     }
 
     /// Search results across all cached entries, or the current folder's children.
@@ -185,6 +207,50 @@ mod tests {
             state.path_names().collect::<Vec<_>>(),
             ["Work", "Contracts"]
         );
+    }
+
+    #[test]
+    fn applies_remote_changes() {
+        let mut state = state();
+        state.apply(Change::Upsert(entry(
+            "plan",
+            "work",
+            "Plan v2.pdf",
+            FileKind::Pdf,
+        )));
+        state.apply(Change::Upsert(entry(
+            "new",
+            "root",
+            "New.pdf",
+            FileKind::Pdf,
+        )));
+        assert_eq!(names(&state), ["Work", "New.pdf"]);
+
+        state.open(&DriveFileId::new("work"));
+        assert_eq!(names(&state), ["Plan v2.pdf", "Contracts"]);
+    }
+
+    #[test]
+    fn leaves_a_removed_folder() {
+        let mut state = state();
+        state.open(&DriveFileId::new("work"));
+        state.open(&DriveFileId::new("contracts"));
+        state.apply(Change::Removed(DriveFileId::new("work")));
+        assert_eq!(state.depth(), 0);
+        assert_eq!(names(&state), ["Plan.pdf"]);
+    }
+
+    #[test]
+    fn renames_an_open_folder() {
+        let mut state = state();
+        state.open(&DriveFileId::new("work"));
+        state.apply(Change::Upsert(entry(
+            "work",
+            "root",
+            "Projects",
+            FileKind::Folder,
+        )));
+        assert_eq!(state.path_names().collect::<Vec<_>>(), ["Projects"]);
     }
 
     #[test]

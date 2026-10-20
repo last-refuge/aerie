@@ -34,6 +34,15 @@ impl FileEntry {
     }
 }
 
+/// One remote change, as reported by Drive's change log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// The item was created, edited, renamed or moved.
+    Upsert(FileEntry),
+    /// The item was trashed, deleted or became inaccessible.
+    Removed(DriveFileId),
+}
+
 /// Formats a byte count with decimal units, matching how Google Drive reports sizes.
 pub fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
