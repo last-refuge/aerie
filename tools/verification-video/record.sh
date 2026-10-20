@@ -5,6 +5,9 @@
 # and the focused window is logged so the editor can follow it.
 #
 #   tools/verification-video/record.sh            # then: tools/verification-video/assemble.py <dir>
+#
+# With AERIE_AUTOMATED=1 nothing is read from the terminal: each step waits for <dir>/next
+# to appear instead, for a driver script that does the steps itself.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -43,9 +46,11 @@ Before you start:
 
 Press Enter to start recording.
 INTRO
-read -r
+automated=${AERIE_AUTOMATED:-}
+[ -n "$automated" ] || read -r
 
-gpu-screen-recorder -w "$monitor" -f 30 -k h264 -q very_high -cursor yes -o "$out/raw.mp4" &
+# HEVC, because H.264 stops at 4096 pixels and HiDPI monitors are often wider.
+gpu-screen-recorder -w "$monitor" -f 30 -k hevc -q very_high -cursor yes -o "$out/raw.mp4" &
 recorder=$!
 start=$(date +%s.%N)
 now() { python3 -c "import time; print(round(time.time() - $start, 2))"; }
@@ -69,7 +74,12 @@ while IFS=$'\t' read -r id show caption instruction; do
   n=$((n + 1))
   printf '{"id":"%s","show":"%s","t":%s}\n' "$id" "$show" "$(now)" >> "$log"
   printf '\n%2d. %s\n    then press Enter… ' "$n" "$instruction"
-  read -r </dev/tty
+  if [ -n "$automated" ]; then
+    until [ -e "$out/next" ]; do sleep 0.2; done
+    rm -f "$out/next"
+  else
+    read -r </dev/tty
+  fi
 done < "$steps"
 printf '{"id":"end","show":"","t":%s}\n' "$(now)" >> "$log"
 
