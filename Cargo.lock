@@ -8,13 +8,12 @@ version = "0.1.0"
 dependencies = [
  "aerie-core",
  "aerie-drive",
+ "aerie-engine",
  "aerie-store",
- "aerie-sync",
  "async-channel",
  "axum",
  "gtk4",
  "libadwaita",
- "notify",
  "pango",
  "serde",
  "serde_json",
@@ -27,6 +26,9 @@ dependencies = [
 [[package]]
 name = "aerie-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "aerie-drive"
@@ -47,11 +49,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "aerie-engine"
+version = "0.1.0"
+dependencies = [
+ "aerie-core",
+ "aerie-drive",
+ "aerie-store",
+ "aerie-sync",
+ "async-channel",
+ "axum",
+ "notify",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aerie-service"
+version = "0.1.0"
+dependencies = [
+ "aerie-engine",
+ "async-channel",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aerie-store"
 version = "0.1.0"
 dependencies = [
  "aerie-core",
  "rusqlite",
+ "serde",
  "thiserror 2.0.21",
 ]
 

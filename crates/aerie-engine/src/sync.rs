@@ -8,13 +8,13 @@ use aerie_store::{Store, SyncSettings};
 use aerie_sync::cycle::{self, Deletions, Report};
 use notify::Watcher;
 
-use super::{Command, Completion, Event, Worker};
+use crate::{Command, Completion, Event, Worker};
 
 /// How long the local folder must be quiet before a pass syncs its changes.
 pub const SETTLE: Duration = Duration::from_secs(2);
 
 /// What the sync status shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SyncState {
     Off,
     Paused,
@@ -27,7 +27,7 @@ pub enum SyncState {
 }
 
 impl Worker {
-    fn sync_settings(&self) -> Option<(String, SyncSettings)> {
+    pub(crate) fn sync_settings(&self) -> Option<(String, SyncSettings)> {
         let account = self.session.as_ref()?.account.clone();
         let settings = self
             .store
@@ -222,7 +222,7 @@ impl Worker {
                 if report.applied > 0 {
                     // Confirm the result with another pass once Drive reports it back.
                     self.emit(Event::CatalogChanged);
-                    self.poll_delay = super::FASTEST_POLL;
+                    self.poll_delay = crate::FASTEST_POLL;
                 }
                 let state = if let Some(count) = report.held_deletions {
                     SyncState::HeldDeletions(count)

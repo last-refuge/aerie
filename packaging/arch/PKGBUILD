@@ -31,7 +31,7 @@ build() {
   # AERIE_OAUTH_CLIENT_ID and AERIE_OAUTH_CLIENT_SECRET. Without them, Aerie reads
   # ~/.config/aerie/oauth-client.json.
   export AERIE_DATA_DIR=/usr/share/aerie
-  cargo build --frozen --release -p aerie-app
+  cargo build --frozen --release -p aerie-app -p aerie-service
 }
 
 check() {
@@ -43,6 +43,7 @@ check() {
 package() {
   cd "$pkgname-$pkgver"
   install -Dm755 target/release/aerie "$pkgdir/usr/bin/aerie"
+  install -Dm755 target/release/aerie-service "$pkgdir/usr/bin/aerie-service"
   install -Dm644 packaging/ai.lastrefuge.Aerie.desktop \
     "$pkgdir/usr/share/applications/ai.lastrefuge.Aerie.desktop"
   install -Dm644 packaging/ai.lastrefuge.Aerie.metainfo.xml \

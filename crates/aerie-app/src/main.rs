@@ -9,7 +9,6 @@ mod engine;
 mod fixtures;
 mod preferences;
 mod sync_page;
-mod transfers;
 mod transfers_page;
 
 use adw::prelude::*;
@@ -37,19 +36,16 @@ fn main() -> glib::ExitCode {
         glib::Char::from(b'b'),
         glib::OptionFlags::NONE,
         glib::OptionArg::None,
-        "Start without a window and keep syncing",
+        "Start the background sync service without a window",
         None,
     );
-    let background = std::rc::Rc::new(std::cell::Cell::new(false));
-    app.connect_handle_local_options(glib::clone!(
-        #[strong]
-        background,
-        move |_, options| {
-            background.set(options.contains("background"));
-            // Continue with normal startup.
-            std::ops::ControlFlow::Continue(())
+    app.connect_handle_local_options(|_, options| {
+        if options.contains("background") {
+            engine::start_service();
+            return std::ops::ControlFlow::Break(glib::ExitCode::SUCCESS);
         }
-    ));
+        std::ops::ControlFlow::Continue(())
+    });
     app.connect_startup(|app| {
         // Dark-first unless the system or the user prefers otherwise.
         preferences::apply_appearance(preferences::Settings::load().appearance);
@@ -65,7 +61,7 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("win.upload", &["<Control>u"]);
         app.set_accels_for_action("win.download", &["<Control>d"]);
     });
-    app.connect_activate(move |app| browser::build_window(app, !background.replace(false)));
+    app.connect_activate(browser::build_window);
     app.run()
 }
 

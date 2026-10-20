@@ -13,6 +13,7 @@ repository = "https://github.com/last-refuge/aerie"
 adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
 aerie-core = { path = "crates/aerie-core" }
 aerie-drive = { path = "crates/aerie-drive" }
+aerie-engine = { path = "crates/aerie-engine" }
 aerie-store = { path = "crates/aerie-store" }
 aerie-sync = { path = "crates/aerie-sync" }
 async-channel = "2"
@@ -30,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["parsing"] }
-tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
