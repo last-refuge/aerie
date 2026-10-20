@@ -8,6 +8,7 @@ pub mod auth;
 pub mod client;
 pub mod credentials;
 pub mod download;
+mod pace;
 pub mod upload;
 
 use thiserror::Error;
@@ -37,6 +38,8 @@ pub enum Error {
     },
     #[error("Google no longer accepts this sign-in; sign in again")]
     SignInExpired,
+    #[error("Google asked Aerie to slow down; it will try again shortly")]
+    RateLimited,
     #[error("network error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("Drive API returned {status}: {message}")]

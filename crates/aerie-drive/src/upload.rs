@@ -103,12 +103,14 @@ impl DriveApi {
         mime_type: &str,
         total: u64,
     ) -> Result<UploadSession> {
-        let response = request
-            .bearer_auth(&self.access_token)
-            .header("X-Upload-Content-Type", mime_type)
-            .header("X-Upload-Content-Length", total)
-            .json(&metadata)
-            .send()
+        let response = self
+            .send(
+                request
+                    .bearer_auth(&self.access_token)
+                    .header("X-Upload-Content-Type", mime_type)
+                    .header("X-Upload-Content-Length", total)
+                    .json(&metadata),
+            )
             .await?;
         if !response.status().is_success() {
             return Err(api_error(response).await);
@@ -128,12 +130,13 @@ impl DriveApi {
     /// Asks Drive how much of the upload it has stored.
     pub async fn upload_status(&self, session: &UploadSession) -> Result<UploadProgress> {
         let response = self
-            .http
-            .put(&session.uri)
-            .bearer_auth(&self.access_token)
-            .header(CONTENT_LENGTH, 0)
-            .header(CONTENT_RANGE, format!("bytes */{}", session.total))
-            .send()
+            .send(
+                self.http
+                    .put(&session.uri)
+                    .bearer_auth(&self.access_token)
+                    .header(CONTENT_LENGTH, 0)
+                    .header(CONTENT_RANGE, format!("bytes */{}", session.total)),
+            )
             .await?;
         progress_from(response).await
     }
@@ -152,13 +155,14 @@ impl DriveApi {
             format!("bytes {offset}-{last}/{}", session.total)
         };
         let response = self
-            .http
-            .put(&session.uri)
-            .bearer_auth(&self.access_token)
-            .header(CONTENT_LENGTH, data.len())
-            .header(CONTENT_RANGE, range)
-            .body(data)
-            .send()
+            .send_paced(
+                self.http
+                    .put(&session.uri)
+                    .bearer_auth(&self.access_token)
+                    .header(CONTENT_LENGTH, data.len())
+                    .header(CONTENT_RANGE, range)
+                    .body(data),
+            )
             .await?;
         progress_from(response).await
     }
@@ -260,7 +264,7 @@ fn parse_received(range: &str) -> Result<u64> {
 /// Network failures, rate limits and server errors are worth retrying.
 fn is_transient(err: &Error) -> bool {
     match err {
-        Error::Http(_) => true,
+        Error::Http(_) | Error::RateLimited => true,
         Error::Api { status, .. } => *status == 429 || *status >= 500,
         _ => false,
     }

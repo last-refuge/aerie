@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.3.1" date="2026-10-20">
+      <description>
+        <p>Paces requests to stay within Google Drive's rate limits, and retries quietly when Google asks Aerie to slow down.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-10-20">
       <description>
         <p>Choose which shared drives to index; others load on demand.</p>

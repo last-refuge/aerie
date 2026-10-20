@@ -31,7 +31,7 @@ impl DriveApi {
         if offset > 0 {
             request = request.header(RANGE, format!("bytes={offset}-"));
         }
-        let response = request.send().await?;
+        let response = self.send(request).await?;
         match response.status() {
             StatusCode::RANGE_NOT_SATISFIABLE => Ok(()),
             // The server sent everything: start the partial file over.
@@ -50,11 +50,12 @@ impl DriveApi {
         progress: impl FnMut(u64, Option<u64>),
     ) -> Result<()> {
         let response = self
-            .http
-            .get(format!("{}/files/{}/export", self.api_base, id.as_str()))
-            .bearer_auth(&self.access_token)
-            .query(&[("mimeType", mime_type), ("supportsAllDrives", "true")])
-            .send()
+            .send(
+                self.http
+                    .get(format!("{}/files/{}/export", self.api_base, id.as_str()))
+                    .bearer_auth(&self.access_token)
+                    .query(&[("mimeType", mime_type), ("supportsAllDrives", "true")]),
+            )
             .await?;
         if !response.status().is_success() {
             return Err(api_error(response).await);

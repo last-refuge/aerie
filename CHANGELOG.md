@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 beta
+
+- **Gentler on Google's limits:** every Drive request is paced to about eight a second, and the pace slows when Google pushes back. Rate-limited requests wait and retry with growing delays (honoring Google's `Retry-After`) instead of failing, so "User rate limit exceeded" no longer reaches you. If Google keeps asking, Aerie waits quietly and tries again later, and an interrupted index picks up where it stopped instead of starting over.
+
 ## 0.3.0 beta
 
 - **Indexing choice:** Preferences › Shared drives can turn off "Index all shared drives" (on by default) and keep only chosen drives indexed. Other drives load folder by folder when opened, and search asks Google for them when online. Each indexed drive gets its own change feed, so unindexed drives cost nothing in the background. Drives holding a synced folder always stay indexed.
