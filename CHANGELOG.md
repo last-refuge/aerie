@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4 beta
+
+- **Steady file list:** the list updates only the rows that changed, so the selection, an open context menu and the scroll position stay put while Aerie indexes or syncs.
+
 ## 0.3.3 beta
 
 - **Indexing survives restarts:** Aerie saves its place after every page of the first index, so quitting, upgrading, a restart or a rate limit continues from there instead of listing every file again. Once the index is complete, Aerie keeps it current from Google's change feed and never rebuilds it unless you change which shared drives to index.

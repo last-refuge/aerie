@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.3.4" date="2026-10-20">
+      <description>
+        <p>The file list keeps your selection and scroll position while Aerie indexes.</p>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-10-20">
       <description>
         <p>An unfinished index continues where it stopped after a restart or upgrade.</p>
