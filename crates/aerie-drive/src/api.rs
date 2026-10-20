@@ -9,7 +9,7 @@ use crate::{Error, Result};
 
 const API: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API: &str = "https://www.googleapis.com/upload/drive/v3";
-pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed,\
+pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed,md5Checksum,headRevisionId,\
 capabilities(canRename,canTrash,canAddChildren,canMoveItemWithinDrive,canDownload,canEdit)";
 
 /// The signed-in Google account.
@@ -508,6 +508,8 @@ pub(crate) struct RemoteFile {
     trashed: bool,
     #[serde(default)]
     capabilities: RemoteCapabilities,
+    md5_checksum: Option<String>,
+    head_revision_id: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -564,6 +566,8 @@ impl RemoteFile {
             id: DriveFileId::new(self.id),
             name: self.name,
             mime_type: self.mime_type,
+            md5: self.md5_checksum,
+            head_revision: self.head_revision_id,
         }
     }
 }

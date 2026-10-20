@@ -50,6 +50,8 @@ pub fn sample_entries() -> Vec<FileEntry> {
             size,
             modified: OCT_1_2026 + (day - 1) * DAY + hour * HOUR,
             mime_type: String::new(),
+            md5: None,
+            head_revision: None,
             can: Capabilities::ALL,
         })
         .collect()

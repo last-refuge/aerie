@@ -4,6 +4,7 @@
 //! treats a missing or partial inventory as deleted files.
 
 mod migrations;
+mod sync;
 mod transfers;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ pub enum Error {
     NewerSchema { found: i64, known: i64 },
 }
 
+pub use sync::{BaselineRow, SyncSettings};
 pub use transfers::{Direction, NewTransfer, Transfer, TransferState};
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -268,7 +270,7 @@ impl Store {
 
     pub fn children(&self, account: &str, folder: &DriveFileId) -> Result<Vec<FileEntry>> {
         let mut statement = self.conn.prepare_cached(
-            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities FROM files
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision FROM files
              WHERE account_id = ?1 AND parent_id = ?2",
         )?;
         let rows = statement.query_map(params![account, folder.as_str()], entry_from_row)?;
@@ -279,7 +281,7 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities FROM files
+                "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision FROM files
                  WHERE account_id = ?1 AND id = ?2",
                 params![account, id.as_str()],
                 entry_from_row,
@@ -298,7 +300,7 @@ impl Store {
                 .replace('_', "\\_")
         );
         let mut statement = self.conn.prepare_cached(
-            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities FROM files
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision FROM files
              WHERE account_id = ?1 AND name LIKE ?2 ESCAPE '\\'
              ORDER BY modified DESC LIMIT ?3",
         )?;
@@ -310,11 +312,11 @@ impl Store {
 fn upsert(conn: &Connection, account: &str, entry: &FileEntry) -> Result<()> {
     conn.execute(
         "INSERT INTO files (account_id, id, parent_id, name, kind, size, modified, mime_type,
-                            capabilities, inventoried)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
+                            capabilities, md5, head_revision, inventoried)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1)
          ON CONFLICT (account_id, id) DO UPDATE SET
            parent_id = ?3, name = ?4, kind = ?5, size = ?6, modified = ?7, mime_type = ?8,
-           capabilities = ?9, inventoried = 1",
+           capabilities = ?9, md5 = ?10, head_revision = ?11, inventoried = 1",
         params![
             account,
             entry.id.as_str(),
@@ -325,6 +327,8 @@ fn upsert(conn: &Connection, account: &str, entry: &FileEntry) -> Result<()> {
             entry.modified,
             entry.mime_type,
             entry.can.bits(),
+            entry.md5,
+            entry.head_revision,
         ],
     )?;
     Ok(())
@@ -340,6 +344,8 @@ fn entry_from_row(row: &Row<'_>) -> rusqlite::Result<FileEntry> {
         modified: row.get(5)?,
         mime_type: row.get(6)?,
         can: Capabilities::from_bits(row.get(7)?),
+        md5: row.get(8)?,
+        head_revision: row.get(9)?,
     })
 }
 

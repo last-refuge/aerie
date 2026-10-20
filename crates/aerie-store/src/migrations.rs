@@ -51,6 +51,32 @@ const MIGRATIONS: &[&str] = &[
         error TEXT,
         created INTEGER NOT NULL
     );",
+    // 4: content identity for sync, and sync configuration and baselines.
+    "ALTER TABLE files ADD COLUMN md5 TEXT;
+    ALTER TABLE files ADD COLUMN head_revision TEXT;
+    UPDATE accounts SET inventory_complete = 0;
+    CREATE TABLE sync_settings (
+        account_id TEXT PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
+        local_root TEXT NOT NULL,
+        paused INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE sync_roots (
+        account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+        remote_id TEXT NOT NULL,
+        PRIMARY KEY (account_id, remote_id)
+    );
+    CREATE TABLE sync_baseline (
+        account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+        remote_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        is_dir INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        mtime INTEGER NOT NULL,
+        device INTEGER NOT NULL,
+        inode INTEGER NOT NULL,
+        PRIMARY KEY (account_id, remote_id)
+    );",
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

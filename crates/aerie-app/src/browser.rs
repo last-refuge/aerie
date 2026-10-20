@@ -1269,6 +1269,8 @@ impl Browser {
                 size: None,
                 modified: glib::DateTime::now_local().map_or(0, |now| now.to_unix()),
                 mime_type: String::new(),
+                md5: None,
+                head_revision: None,
                 can: aerie_core::Capabilities::ALL,
             }));
             let depth = state.depth();
