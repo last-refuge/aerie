@@ -29,7 +29,9 @@ fn main() -> glib::ExitCode {
     let _logs = diagnostics::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting Aerie");
     glib::set_application_name("Aerie");
-    let app = adw::Application::builder().application_id(INSTANCE_ID).build();
+    let app = adw::Application::builder()
+        .application_id(INSTANCE_ID)
+        .build();
     app.add_main_option(
         "background",
         glib::Char::from(b'b'),
