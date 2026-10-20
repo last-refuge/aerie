@@ -160,7 +160,10 @@ async fn main() -> Result<(), Error> {
 
     pass("6. With nothing changed, a pass does nothing");
     let report = run(&drive, &mut store, &account, &root, &quarantine).await?;
-    check(report.planned == 0, "no feedback loop from Aerie's own writes")?;
+    check(
+        report.planned == 0,
+        "no feedback loop from Aerie's own writes",
+    )?;
 
     pass("7. A vanished sync folder stops sync instead of deleting");
     std::fs::rename(&root, scratch.join("moved-away"))?;
