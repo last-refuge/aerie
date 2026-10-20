@@ -179,6 +179,19 @@ enum Completion {
     Sync(aerie_drive::Result<aerie_sync::cycle::Report>),
 }
 
+/// Commands quick enough to handle between pages of a long inventory, so the app stays
+/// usable while it runs.
+fn runs_during_inventory(command: &Command) -> bool {
+    !matches!(
+        command,
+        Command::SignIn { .. }
+            | Command::Refresh
+            | Command::StartSync { .. }
+            | Command::SetSyncRoots(_)
+            | Command::Shutdown
+    )
+}
+
 /// Runs the engine until the command channel closes or a [`Command::Shutdown`] arrives.
 /// `own` is a sender into `inbox`, for the folder watcher. `busy` reports whether the
 /// engine has work that should keep the service alive without any window connected.
@@ -196,7 +209,8 @@ struct Session {
     scope: &'static str,
     refresh_token: String,
     drive: DriveApi,
-    expires_at: Option<Instant>,
+    /// Wall-clock, so a token that expired while the computer slept is refreshed.
+    expires_at: Option<std::time::SystemTime>,
 }
 
 struct Worker {
@@ -440,7 +454,7 @@ impl Worker {
             refresh_token,
             drive: DriveApi::new(http, String::new()),
             // Force a token refresh on the first request.
-            expires_at: Some(Instant::now()),
+            expires_at: Some(std::time::SystemTime::now()),
         };
 
         let account = match self.store().account() {
@@ -613,6 +627,14 @@ impl Worker {
                 self.offline = true;
                 self.emit(Event::Offline);
             }
+            Err(DriveError::Api { status: 401, .. }) => {
+                // Google no longer accepts the access token; get a new one and try again.
+                tracing::info!("access token rejected; refreshing");
+                if let Some(session) = self.session.as_mut() {
+                    session.expires_at = Some(std::time::UNIX_EPOCH);
+                }
+                self.poll_delay = FASTEST_POLL;
+            }
             Err(DriveError::RateLimited) => {
                 // Not a problem to show: wait as long as polling ever does, then resume.
                 tracing::warn!("Google asked Aerie to slow down; waiting");
@@ -650,7 +672,7 @@ impl Worker {
         let session = self.session.as_mut().expect("checked by caller");
         let fresh = session
             .expires_at
-            .is_none_or(|at| at > Instant::now() + Duration::from_secs(60));
+            .is_none_or(|at| at > std::time::SystemTime::now() + Duration::from_secs(60));
         if fresh {
             return Ok(());
         }
@@ -906,6 +928,12 @@ impl Worker {
             DriveError::SignInExpired => {
                 "Your sign-in expired. Sign in again to continue.".to_owned()
             }
+            DriveError::Api { status: 401, .. } => {
+                if let Some(session) = self.session.as_mut() {
+                    session.expires_at = Some(std::time::UNIX_EPOCH);
+                }
+                "Aerie had to renew its sign-in. Try that again.".to_owned()
+            }
             DriveError::RateLimited => {
                 "Google Drive is busy with Aerie’s requests. Try again in a minute.".to_owned()
             }
@@ -1102,6 +1130,24 @@ impl Worker {
         indexed: &[DriveFileId],
         from: Resume,
     ) -> aerie_drive::Result<bool> {
+        let mut deferred = Vec::new();
+        let result = self
+            .list_corpora_from(account, indexed, from, &mut deferred)
+            .await;
+        // Sign-in and sync completions wait for the main loop.
+        for done in deferred {
+            let _ = self.completions.0.try_send(done);
+        }
+        result
+    }
+
+    async fn list_corpora_from(
+        &mut self,
+        account: &str,
+        indexed: &[DriveFileId],
+        from: Resume,
+        deferred: &mut Vec<Completion>,
+    ) -> aerie_drive::Result<bool> {
         let Resume {
             corpus: first,
             page,
@@ -1119,11 +1165,18 @@ impl Worker {
         for (index, corpus) in corpora {
             let mut page_token: Option<String> = page.take().flatten();
             loop {
-                // Stay responsive to sign-out during a long inventory.
-                if let Ok(command) = self.inbox.try_recv() {
+                // Stay responsive during a long inventory: file actions and transfers
+                // go ahead, sign-out and indexing changes end it.
+                while let Ok(command) = self.inbox.try_recv() {
                     match command {
                         Command::SignOut => {
                             self.sign_out().await;
+                            return Ok(false);
+                        }
+                        // Stop here; the main loop sees the shutdown and exits. The next
+                        // start resumes from the cache, not from this page.
+                        Command::Shutdown => {
+                            let _ = self.own.try_send(Command::Shutdown);
                             return Ok(false);
                         }
                         // A new indexing choice restarts the inventory to match it.
@@ -1136,9 +1189,22 @@ impl Worker {
                             self.poll_delay = FASTEST_POLL;
                             return Ok(false);
                         }
+                        command if runs_during_inventory(&command) => {
+                            Box::pin(self.handle(command)).await;
+                        }
                         command => self.pending.push(command),
                     }
                 }
+                while let Ok(done) = self.completions.1.try_recv() {
+                    match done {
+                        Completion::Transfer(id, result) => {
+                            self.transfer = None;
+                            Box::pin(self.finish_transfer(id, result)).await;
+                        }
+                        other => deferred.push(other),
+                    }
+                }
+                Box::pin(self.pump_transfers()).await;
                 let session = self.session.as_ref().expect("still signed in");
                 let (entries, next) = match session
                     .drive

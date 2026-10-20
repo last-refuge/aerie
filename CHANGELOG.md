@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 beta
+
+- **Uploads while indexing:** uploads, downloads and file actions no longer wait for a long index to finish; they go ahead between pages of it.
+- **Upload feedback:** starting an upload says what's going where, with a button to open Transfers. Files dragged over the file list outline the drop area, and a folder that can't take files says so.
+- **Sign-in after sleep:** Aerie renews its Google sign-in after the computer wakes from sleep instead of failing until it's restarted.
+
 ## 0.3.1 beta
 
 - **Gentler on Google's limits:** every Drive request is paced to about eight a second, and the pace slows when Google pushes back. Rate-limited requests wait and retry with growing delays (honoring Google's `Retry-After`) instead of failing, so "User rate limit exceeded" no longer reaches you. If Google keeps asking, Aerie waits quietly and tries again later, and an interrupted index picks up where it stopped instead of starting over.

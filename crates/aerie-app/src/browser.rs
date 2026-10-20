@@ -914,7 +914,7 @@ impl Browser {
         });
     }
 
-    fn upload(&self, files: Vec<gio::File>) {
+    fn upload(self: &Rc<Self>, files: Vec<gio::File>) {
         let parent = self.state.borrow().current_folder().clone();
         let files: Vec<LocalFile> = files
             .into_iter()
@@ -926,8 +926,53 @@ impl Browser {
                 LocalFile { path, mime_type }
             })
             .collect();
-        if !files.is_empty() {
-            self.engine.send(Command::Upload { files, parent });
+        if files.is_empty() {
+            return;
+        }
+        let what = match files.as_slice() {
+            [file] => format!(
+                "“{}”",
+                file.path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+            files => format!("{} files", files.len()),
+        };
+        let folder = {
+            let state = self.state.borrow();
+            if &parent == state.root() {
+                None
+            } else {
+                state.catalog().get(&parent).map(|folder| folder.name)
+            }
+        }
+        .unwrap_or_else(|| self.root_label());
+        self.engine.send(Command::Upload { files, parent });
+
+        let toast = adw::Toast::builder()
+            .title(format!("Uploading {what} to “{folder}”"))
+            .button_label("Show")
+            .build();
+        toast.connect_button_clicked(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_| browser.show_transfers()
+        ));
+        self.toast(toast);
+    }
+
+    fn show_transfers(&self) {
+        self.transfers_row.set_visible(true);
+        self.drives_list.unselect_all();
+        self.places.select_row(Some(&self.transfers_row));
+        self.pages.set_visible_child_name("transfers");
+    }
+
+    fn toast(&self, toast: adw::Toast) {
+        if let Some(overlay) = self
+            .window()
+            .and_then(|window| window.content())
+            .and_downcast::<adw::ToastOverlay>()
+        {
+            overlay.add_toast(toast);
         }
     }
 
@@ -974,6 +1019,11 @@ impl Browser {
                     return false;
                 };
                 if !enabled {
+                    browser.toast(adw::Toast::new(if browser.state.borrow().is_searching() {
+                        "Clear the search to upload into a folder."
+                    } else {
+                        "You can’t add files to this folder."
+                    }));
                     return false;
                 }
                 browser.upload(list.files());
@@ -1086,6 +1136,7 @@ impl Browser {
         body.append(&self.breadcrumbs);
         body.append(&self.content);
         content.set_content(Some(&body));
+        body.add_css_class("drop-zone");
         self.install_drop_target(&body);
 
         self.pages.add_named(&content, Some("files"));
