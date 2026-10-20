@@ -22,6 +22,14 @@ pub enum Deletions {
     Restore,
 }
 
+/// Where a pass is: the synced folder the current step works in, and how far along.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Progress {
+    pub root: Option<aerie_core::DriveFileId>,
+    pub done: usize,
+    pub total: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct Report {
     /// Steps planned this pass, including any that failed or were held.
@@ -52,6 +60,7 @@ pub async fn run(
     root: &Path,
     quarantine: &Path,
     deletions: Deletions,
+    mut progress: impl FnMut(Progress),
 ) -> Result<Report> {
     let roots: Vec<FileEntry> = store
         .sync_roots(account)
@@ -96,7 +105,25 @@ pub async fn run(
     report.planned = ops.len();
 
     let mut executor = Executor::new(drive, store, account, root, quarantine, &remote, &baseline);
-    for op in &ops {
+    // Which synced folder each step works in, by its top-level local name.
+    let root_ids: Vec<_> = roots.iter().map(|root| root.id.clone()).collect();
+    let root_by_name: std::collections::HashMap<PathBuf, aerie_core::DriveFileId> = remote
+        .iter()
+        .filter(|item| root_ids.contains(&item.id))
+        .map(|item| (item.path.clone(), item.id.clone()))
+        .collect();
+    let total = ops.len();
+    for (done, op) in ops.iter().enumerate() {
+        let working_in = op
+            .path()
+            .and_then(|path| path.components().next())
+            .and_then(|first| root_by_name.get(&PathBuf::from(first.as_os_str())))
+            .cloned();
+        progress(Progress {
+            root: working_in,
+            done,
+            total,
+        });
         match executor.run(op).await {
             Ok(Done::Applied) => report.applied += 1,
             Ok(Done::ConflictCopy(copy)) => {

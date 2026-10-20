@@ -95,6 +95,12 @@ pub fn build_window(app: &adw::Application) {
                     Event::Sync(_) | Event::SignedIn(_) | Event::SignedOut | Event::CatalogChanged
                 ) {
                     let (settings, roots, folders) = browser.sync_view();
+                    let synced = if settings.as_ref().is_some_and(|s| !s.paused) {
+                        roots.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    browser.set_synced_roots(synced);
                     sync.show(settings, roots, folders);
                 }
                 match event {
@@ -102,7 +108,18 @@ pub fn build_window(app: &adw::Application) {
                         transfers.progress(id, done, total)
                     }
                     Event::TransfersChanged => {}
+                    Event::SyncProgress { root, done, total } => {
+                        let name = root
+                            .as_ref()
+                            .and_then(|id| browser.state.borrow().catalog().get(id))
+                            .map(|folder| folder.name);
+                        sync.set_progress(name.as_deref(), done, total);
+                        browser.set_sync_activity(root);
+                    }
                     Event::Sync(state) => {
+                        if state != crate::engine::SyncState::Syncing {
+                            browser.set_sync_activity(None);
+                        }
                         sync.set_state(&state);
                         browser.set_sync_state(state);
                     }
@@ -317,6 +334,7 @@ fn handle_event(
         Event::Problem(message) => toasts.add_toast(adw::Toast::new(&message)),
         Event::TransfersChanged
         | Event::TransferProgress { .. }
+        | Event::SyncProgress { .. }
         | Event::Sync(_)
         | Event::ConflictKept(_) => {}
         Event::NeedsWriteAccess => {
@@ -492,6 +510,11 @@ enum Status {
 /// Widgets over a [`BrowseState`]. Navigation and search rebuild the visible list.
 struct Browser {
     engine: Rc<Engine>,
+    synced_roots: RefCell<std::collections::HashSet<DriveFileId>>,
+    /// The synced folder the current pass is working in.
+    active_root: RefCell<Option<DriveFileId>>,
+    /// The mark for the open folder, shown beside its breadcrumb.
+    crumb_mark: Cell<SyncMark>,
     /// The shared drive being browsed, or `None` for My Drive.
     tree: RefCell<Option<FileEntry>>,
     drives_header: gtk::Label,
@@ -587,6 +610,9 @@ impl Browser {
         }
         let browser = Rc::new(Self {
             engine,
+            synced_roots: RefCell::default(),
+            active_root: RefCell::default(),
+            crumb_mark: Cell::new(SyncMark::None),
             tree: RefCell::default(),
             drives_header: gtk::Label::builder()
                 .label("Shared drives")
@@ -1360,6 +1386,45 @@ impl Browser {
         }
     }
 
+    /// A folder is synced when it, or a folder above it, is a sync root.
+    fn mark(&self, catalog: &AppCatalog, folder: &DriveFileId) -> SyncMark {
+        let roots = self.synced_roots.borrow();
+        if roots.is_empty() || !catalog.is_drive() {
+            return SyncMark::None;
+        }
+        let active = self.active_root.borrow();
+        let mut current = Some(folder.clone());
+        // Folder trees are shallow; the bound guards against a cycle in bad data.
+        for _ in 0..64 {
+            let Some(id) = current else { break };
+            if roots.contains(&id) {
+                return if active.as_ref() == Some(&id) {
+                    SyncMark::Syncing
+                } else {
+                    SyncMark::Synced
+                };
+            }
+            current = catalog.get(&id).and_then(|entry| entry.parent);
+        }
+        SyncMark::None
+    }
+
+    fn set_synced_roots(self: &Rc<Self>, roots: Vec<DriveFileId>) {
+        let roots: std::collections::HashSet<_> = roots.into_iter().collect();
+        if *self.synced_roots.borrow() != roots {
+            self.synced_roots.replace(roots);
+            self.refresh();
+        }
+    }
+
+    /// Marks the synced folder a pass is working in, or none.
+    fn set_sync_activity(self: &Rc<Self>, root: Option<DriveFileId>) {
+        if *self.active_root.borrow() != root {
+            self.active_root.replace(root);
+            self.refresh();
+        }
+    }
+
     /// Refreshes after navigation, which ends any search.
     fn show_state(self: &Rc<Self>) {
         if self.search.text().is_empty() {
@@ -1376,9 +1441,18 @@ impl Browser {
         let items: Vec<glib::BoxedAnyObject> = state
             .visible()
             .into_iter()
-            .map(glib::BoxedAnyObject::new)
+            .map(|entry| {
+                let mark = if entry.is_folder() {
+                    self.mark(state.catalog(), &entry.id)
+                } else {
+                    SyncMark::None
+                };
+                glib::BoxedAnyObject::new(Row { entry, mark })
+            })
             .collect();
+        let crumb_mark = self.mark(state.catalog(), state.current_folder());
         drop(state);
+        self.crumb_mark.set(crumb_mark);
         self.store.remove_all();
         self.store.extend_from_slice(&items);
 
@@ -1441,6 +1515,12 @@ impl Browser {
             }
             if depth == last {
                 self.breadcrumbs.append(&crumb_label(name));
+                let badge = gtk::Image::builder()
+                    .css_classes(["sync-badge"])
+                    .pixel_size(14)
+                    .build();
+                show_mark(&badge, self.crumb_mark.get());
+                self.breadcrumbs.append(&badge);
                 continue;
             }
             let button = gtk::Button::builder()
@@ -1575,11 +1655,50 @@ fn by(compare: impl Fn(&FileEntry, &FileEntry) -> Ordering + 'static) -> gtk::Cu
     })
 }
 
-fn entry_of(object: &glib::Object) -> std::cell::Ref<'_, FileEntry> {
+/// Whether a folder syncs to this computer, and whether a pass is working in it now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncMark {
+    None,
+    Synced,
+    Syncing,
+}
+
+/// One row of the file list.
+struct Row {
+    entry: FileEntry,
+    mark: SyncMark,
+}
+
+fn row_of(object: &glib::Object) -> std::cell::Ref<'_, Row> {
     object
         .downcast_ref::<glib::BoxedAnyObject>()
-        .expect("list items are file entries")
-        .borrow::<FileEntry>()
+        .expect("list items are rows")
+        .borrow::<Row>()
+}
+
+fn entry_of(object: &glib::Object) -> std::cell::Ref<'_, FileEntry> {
+    std::cell::Ref::map(row_of(object), |row| &row.entry)
+}
+
+/// The badge beside a synced folder: a gently turning arrow while syncing, a cloud with a
+/// check otherwise.
+fn show_mark(badge: &gtk::Image, mark: SyncMark) {
+    badge.set_visible(mark != SyncMark::None);
+    match mark {
+        SyncMark::Syncing => {
+            badge.set_icon_name(Some("aerie-refresh-cw-symbolic"));
+            badge.set_tooltip_text(Some("Syncing now"));
+            badge.add_css_class("syncing");
+        }
+        SyncMark::Synced => {
+            badge.set_icon_name(Some("aerie-cloud-check-symbolic"));
+            badge.set_tooltip_text(Some("Synced to this computer"));
+            badge.remove_css_class("syncing");
+        }
+        SyncMark::None => badge.remove_css_class("syncing"),
+    }
+    let label = badge.tooltip_text().unwrap_or_default();
+    badge.update_property(&[gtk::accessible::Property::Label(&label)]);
 }
 
 fn name_factory() -> gtk::SignalListItemFactory {
@@ -1593,12 +1712,20 @@ fn name_factory() -> gtk::SignalListItemFactory {
                 .ellipsize(gtk::pango::EllipsizeMode::Middle)
                 .build(),
         );
+        row.append(
+            &gtk::Image::builder()
+                .css_classes(["sync-badge"])
+                .pixel_size(14)
+                .visible(false)
+                .build(),
+        );
         list_item(item).set_child(Some(&row));
     });
     factory.connect_bind(|_, item| {
         let item = list_item(item);
         let object = item.item().expect("bound item");
-        let entry = entry_of(&object);
+        let row_data = row_of(&object);
+        let entry = &row_data.entry;
         let row = item.child().expect("row widget");
         let icon = row
             .first_child()
@@ -1608,6 +1735,11 @@ fn name_factory() -> gtk::SignalListItemFactory {
             .next_sibling()
             .and_downcast::<gtk::Label>()
             .expect("label");
+        let badge = label
+            .next_sibling()
+            .and_downcast::<gtk::Image>()
+            .expect("badge");
+        show_mark(&badge, row_data.mark);
         icon.set_icon_name(Some(icon_name(entry.kind)));
         if entry.is_folder() {
             icon.add_css_class("folder");
