@@ -7,6 +7,7 @@ pub mod api;
 pub mod auth;
 pub mod client;
 pub mod credentials;
+pub mod upload;
 
 use thiserror::Error;
 
@@ -37,6 +38,8 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("Drive API returned {status}: {message}")]
     Api { status: u16, message: String },
+    #[error("the upload session expired; start a new upload")]
+    UploadSessionExpired,
     #[error("system keyring error: {0}")]
     Keyring(Box<oo7::Error>),
     #[error("local I/O error: {0}")]
