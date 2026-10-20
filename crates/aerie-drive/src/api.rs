@@ -367,11 +367,21 @@ impl DriveApi {
             .query(params)
             .send()
             .await?;
+        tracing::debug!(
+            endpoint = path_kind(path),
+            status = response.status().as_u16(),
+            "Drive request"
+        );
         if response.status().is_success() {
             return Ok(response.json().await?);
         }
         Err(api_error(response).await)
     }
+}
+
+/// The endpoint without file IDs, for logs.
+fn path_kind(path: &str) -> &str {
+    path.split('/').next().unwrap_or(path)
 }
 
 /// Turns an unsuccessful response into an error, using Drive's message when present.

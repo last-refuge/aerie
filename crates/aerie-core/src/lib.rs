@@ -2,6 +2,7 @@
 
 mod browse;
 mod files;
+pub mod redact;
 
 use std::fmt;
 

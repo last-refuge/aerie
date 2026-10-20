@@ -1,6 +1,7 @@
 //! Aerie desktop application.
 
 mod browser;
+mod diagnostics;
 mod fixtures;
 
 use adw::prelude::*;
@@ -9,6 +10,8 @@ use gtk::{gdk, glib};
 const APP_ID: &str = "io.github.last_refuge.Aerie";
 
 fn main() -> glib::ExitCode {
+    let _logs = diagnostics::init();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting Aerie");
     glib::set_application_name("Aerie");
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_startup(|app| {
