@@ -22,6 +22,8 @@ pub enum Appearance {
 #[serde(default)]
 pub struct Settings {
     pub appearance: Appearance,
+    /// The sidebar width the user dragged to, in pixels.
+    pub sidebar_width: Option<f64>,
 }
 
 fn config_dir() -> PathBuf {
@@ -50,7 +52,7 @@ impl Settings {
             .unwrap_or_default()
     }
 
-    fn save(&self) {
+    pub fn save(&self) {
         let path = settings_path();
         let result = path
             .parent()
