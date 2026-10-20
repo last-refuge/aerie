@@ -18,7 +18,9 @@ use crate::fixtures::{self, ROOT_ID};
 use crate::sync_page::SyncPage;
 use crate::transfers_page::TransfersPage;
 
-pub fn build_window(app: &adw::Application) {
+/// Opens the main window, or builds it hidden when Aerie starts in the background at
+/// login. A hidden start with nothing to sync quits once that's known.
+pub fn build_window(app: &adw::Application, present: bool) {
     // A window hidden while sync runs in the background comes back.
     if let Some(window) = app.windows().first() {
         window.present();
@@ -97,6 +99,15 @@ pub fn build_window(app: &adw::Application) {
                     browser.set_background(&window, settings.as_ref().is_some_and(|s| !s.paused));
                     sync.show(settings, roots, folders);
                 }
+                // Started in the background with nothing to keep running for: exit.
+                let idle = matches!(
+                    event,
+                    Event::Sync(crate::engine::SyncState::Off) | Event::NeedsSignIn { .. }
+                );
+                if idle && !window.is_visible() {
+                    browser.set_background(&window, false);
+                    window.close();
+                }
                 match event {
                     Event::TransferProgress { id, done, total } => {
                         transfers.progress(id, done, total)
@@ -122,7 +133,9 @@ pub fn build_window(app: &adw::Application) {
         }
     ));
 
-    window.present();
+    if present {
+        window.present();
+    }
 }
 
 fn install_actions(

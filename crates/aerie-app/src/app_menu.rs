@@ -23,6 +23,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     (
         "General",
         &[
+            ("Preferences", "<Control>comma"),
             ("Keyboard shortcuts", "<Control>question"),
             ("Quit", "<Control>q"),
         ],
@@ -36,6 +37,18 @@ pub fn install(app: &adw::Application) {
         app,
         move |_, _| show_shortcuts(&app)
     ));
+    let preferences = gio::SimpleAction::new("preferences", None);
+    preferences.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| {
+            if let Some(window) = app.active_window() {
+                crate::preferences::show(&window);
+            }
+        }
+    ));
+    app.add_action(&preferences);
+    app.set_accels_for_action("app.preferences", &["<Control>comma"]);
     let about = gio::SimpleAction::new("about", None);
     about.connect_activate(glib::clone!(
         #[weak]
@@ -61,6 +74,7 @@ pub fn button() -> gtk::MenuButton {
     account.append(Some("Check for Changes"), Some("win.refresh"));
     account.append(Some("Sign Out"), Some("win.sign-out"));
     menu.append_section(None, &account);
+    menu.append(Some("Preferences"), Some("app.preferences"));
     menu.append(Some("Keyboard Shortcuts"), Some("app.shortcuts"));
     menu.append(Some("About Aerie"), Some("app.about"));
     menu.append(Some("Quit"), Some("app.quit"));

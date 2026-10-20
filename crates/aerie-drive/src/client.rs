@@ -38,6 +38,31 @@ impl OAuthClient {
         Self::from_json(&json)
     }
 
+    /// The client file if present, otherwise one built into this binary by a packager
+    /// through `AERIE_OAUTH_CLIENT_ID` and `AERIE_OAUTH_CLIENT_SECRET`.
+    pub fn configured() -> Result<Self> {
+        let path = Self::default_path();
+        match Self::load(&path) {
+            Err(Error::ClientFile { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                match (
+                    option_env!("AERIE_OAUTH_CLIENT_ID"),
+                    option_env!("AERIE_OAUTH_CLIENT_SECRET"),
+                ) {
+                    (Some(id), Some(secret)) => Ok(Self {
+                        client_id: id.to_owned(),
+                        client_secret: secret.to_owned(),
+                        auth_uri: "https://accounts.google.com/o/oauth2/auth".to_owned(),
+                        token_uri: "https://oauth2.googleapis.com/token".to_owned(),
+                    }),
+                    _ => Err(Error::ClientFile { path, source }),
+                }
+            }
+            other => other,
+        }
+    }
+
     pub fn from_json(json: &str) -> Result<Self> {
         Ok(serde_json::from_str::<ClientFile>(json)?.installed)
     }

@@ -193,6 +193,22 @@ impl TransfersPage {
                     );
                 });
                 row.add_suffix(&open);
+                let reveal = gtk::Button::builder()
+                    .icon_name("folder-open-symbolic")
+                    .tooltip_text("Show in Folder")
+                    .valign(gtk::Align::Center)
+                    .css_classes(["flat"])
+                    .build();
+                let path = transfer.local_path.clone();
+                reveal.connect_clicked(move |button| {
+                    let file = gio::File::for_path(&path);
+                    gtk::FileLauncher::new(Some(&file)).open_containing_folder(
+                        button.root().and_downcast_ref::<gtk::Window>(),
+                        gio::Cancellable::NONE,
+                        |_| {},
+                    );
+                });
+                row.add_suffix(&reveal);
             }
             TransferState::Done | TransferState::Cancelled => {}
         }

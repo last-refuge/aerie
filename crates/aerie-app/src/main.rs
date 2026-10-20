@@ -7,6 +7,7 @@ mod catalog;
 mod diagnostics;
 mod engine;
 mod fixtures;
+mod preferences;
 mod sync_page;
 mod transfers;
 mod transfers_page;
@@ -21,9 +22,27 @@ fn main() -> glib::ExitCode {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting Aerie");
     glib::set_application_name("Aerie");
     let app = adw::Application::builder().application_id(APP_ID).build();
+    app.add_main_option(
+        "background",
+        glib::Char::from(b'b'),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Start without a window and keep syncing",
+        None,
+    );
+    let background = std::rc::Rc::new(std::cell::Cell::new(false));
+    app.connect_handle_local_options(glib::clone!(
+        #[strong]
+        background,
+        move |_, options| {
+            background.set(options.contains("background"));
+            // Continue with normal startup.
+            std::ops::ControlFlow::Continue(())
+        }
+    ));
     app.connect_startup(|app| {
-        // The brand is dark-first; an explicit system preference still wins.
-        adw::StyleManager::default().set_color_scheme(adw::ColorScheme::PreferDark);
+        // Dark-first unless the system or the user prefers otherwise.
+        preferences::apply_appearance(preferences::Settings::load().appearance);
         load_css();
         add_dev_icons();
         app_menu::install(app);
@@ -35,7 +54,7 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("win.upload", &["<Control>u"]);
         app.set_accels_for_action("win.download", &["<Control>d"]);
     });
-    app.connect_activate(browser::build_window);
+    app.connect_activate(move |app| browser::build_window(app, !background.replace(false)));
     app.run()
 }
 
