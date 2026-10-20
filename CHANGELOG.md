@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0 beta (unreleased)
+## 0.2.0 beta
+
+- **The Aerie look:** the cloud mark on the welcome screen and in the sidebar, Lucide icons throughout, and Inter and JetBrains Mono bundled with the app.
+- **Shared drives:** browse, search, manage and sync shared drives alongside My Drive.
+- **Sync service:** sync runs in `aerie-service`, a background process that keeps working after you close the window, starts at login if you choose, and exits when there's nothing to sync.
+- **Sync badges:** synced folders show a badge, which turns while sync works in them. The Sync page shows the folder and step in progress.
+
+## 0.1.0 beta
 
 The first beta of Aerie, Google Drive for Linux.
 
@@ -11,4 +18,4 @@ The first beta of Aerie, Google Drive for Linux.
 - **Sync** chosen My Drive folders with a local folder in both directions. Conflicts keep both versions, deletions go to the trash, large deletions wait for your confirmation, and a missing sync folder stops sync instead of deleting anything.
 - **Runs in the background** while syncing, can **start at login**, and follows the system's dark or light appearance.
 
-Known limits: one Google account; My Drive only, without shared drives or "Shared with me"; no tray icon; Google-native documents open in the browser rather than syncing.
+Known limits: one Google account; no "Shared with me" view; no tray icon; Google-native documents open in the browser rather than syncing.
