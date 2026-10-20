@@ -4,28 +4,57 @@
 
 use std::time::{Duration, Instant};
 
-use aerie_core::redact;
+use aerie_core::{Change, DriveFileId, redact};
 use aerie_drive::api::{ChangeCursor, DriveApi};
-use aerie_drive::auth::{self, DRIVE_READONLY};
+use aerie_drive::auth::{self, DRIVE, DRIVE_FILE, DRIVE_READONLY};
 use aerie_drive::client::OAuthClient;
 use aerie_drive::{Error as DriveError, credentials, http_client};
 use aerie_store::{Account, Store};
 use async_channel::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
-/// The OAuth scope the current milestone needs.
-const SCOPE: &str = DRIVE_READONLY;
+/// The scopes Aerie asks for: read-only until the user first changes something, then full
+/// Drive access. `AERIE_DEV_SCOPE=drive.file` confines a development build to files Aerie
+/// creates itself, so write features can be tried on a real account safely.
+fn scopes() -> (&'static str, &'static str) {
+    match std::env::var("AERIE_DEV_SCOPE").as_deref() {
+        Ok("drive.file") => (DRIVE_FILE, DRIVE_FILE),
+        _ => (DRIVE_READONLY, DRIVE),
+    }
+}
 const FASTEST_POLL: Duration = Duration::from_secs(10);
 const SLOWEST_POLL: Duration = Duration::from_secs(120);
 const OFFLINE_RETRY: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub enum Command {
-    SignIn,
+    /// Sign in, asking for write access when `write` is set.
+    SignIn {
+        write: bool,
+    },
     CancelSignIn,
     SignOut,
     /// Check for changes now, for example after the user asks to retry.
     Refresh,
+    CreateFolder {
+        parent: DriveFileId,
+        name: String,
+    },
+    Rename {
+        id: DriveFileId,
+        name: String,
+    },
+    Move {
+        id: DriveFileId,
+        from: DriveFileId,
+        to: DriveFileId,
+    },
+    Trash {
+        id: DriveFileId,
+    },
+    Untrash {
+        id: DriveFileId,
+    },
 }
 
 #[derive(Debug)]
@@ -50,6 +79,13 @@ pub enum Event {
     CatalogChanged,
     Offline,
     Problem(String),
+    /// The session is read-only; changing files needs a new consent from Google.
+    NeedsWriteAccess,
+    /// A file action finished. `undo` restores a trashed item.
+    Done {
+        message: String,
+        undo: Option<DriveFileId>,
+    },
 }
 
 pub struct Engine {
@@ -81,6 +117,7 @@ impl Engine {
 
 struct Session {
     account: String,
+    scope: &'static str,
     refresh_token: String,
     drive: DriveApi,
     expires_at: Option<Instant>,
@@ -92,6 +129,7 @@ struct Worker {
     store: Option<Store>,
     session: Option<Session>,
     sign_in: Option<JoinHandle<aerie_drive::Result<auth::Tokens>>>,
+    sign_in_scope: &'static str,
     poll_delay: Duration,
     offline: bool,
     /// Commands that arrived during a long inventory, handled once it finishes.
@@ -106,6 +144,7 @@ impl Worker {
             store: None,
             session: None,
             sign_in: None,
+            sign_in_scope: DRIVE_READONLY,
             poll_delay: FASTEST_POLL,
             offline: false,
             pending: Vec::new(),
@@ -163,7 +202,7 @@ impl Worker {
 
     async fn handle(&mut self, command: Command) {
         match command {
-            Command::SignIn => self.start_sign_in().await,
+            Command::SignIn { write } => self.start_sign_in(write).await,
             Command::CancelSignIn => {
                 if let Some(task) = self.sign_in.take() {
                     task.abort();
@@ -177,6 +216,7 @@ impl Worker {
                     self.check().await;
                 }
             }
+            action => self.act(action).await,
         }
     }
 
@@ -189,8 +229,16 @@ impl Worker {
     /// Resumes a previous session from the keyring. The cache is usable at once, even
     /// offline; the network check happens in the background.
     async fn restore_session(&mut self) {
-        let refresh_token = match credentials::load_refresh_token(SCOPE).await {
-            Ok(Some(token)) => token,
+        let (read, write) = scopes();
+        let stored = match credentials::load_refresh_token(write).await {
+            Ok(Some(token)) => Ok(Some((write, token))),
+            Ok(None) => credentials::load_refresh_token(read)
+                .await
+                .map(|token| token.map(|token| (read, token))),
+            Err(err) => Err(err),
+        };
+        let (scope, refresh_token) = match stored {
+            Ok(Some(stored)) => stored,
             Ok(None) => return self.emit(Event::NeedsSignIn { expired: false }),
             Err(err) => {
                 tracing::error!(%err, "couldn't read the keyring");
@@ -202,6 +250,7 @@ impl Worker {
         let Ok(http) = http_client() else { return };
         let mut session = Session {
             account: String::new(),
+            scope,
             refresh_token,
             drive: DriveApi::new(http, String::new()),
             // Force a token refresh on the first request.
@@ -214,7 +263,7 @@ impl Worker {
             _ => match self.fetch_account(&mut session).await {
                 Ok(account) => account,
                 Err(DriveError::SignInExpired) => {
-                    let _ = credentials::delete_refresh_token(SCOPE).await;
+                    let _ = credentials::delete_refresh_token(scope).await;
                     return self.emit(Event::NeedsSignIn { expired: false });
                 }
                 Err(err) => {
@@ -244,10 +293,13 @@ impl Worker {
         Ok(account)
     }
 
-    async fn start_sign_in(&mut self) {
+    async fn start_sign_in(&mut self, write: bool) {
         if self.sign_in.is_some() {
             return;
         }
+        let (read, write_scope) = scopes();
+        let scope = if write { write_scope } else { read };
+        self.sign_in_scope = scope;
         let client = match OAuthClient::load(&OAuthClient::default_path()) {
             Ok(client) => client,
             Err(err) => {
@@ -261,7 +313,7 @@ impl Worker {
         let events = self.events.clone();
         self.emit(Event::SignInStarted);
         self.sign_in = Some(tokio::spawn(async move {
-            auth::sign_in(&client, &http, SCOPE, |url| {
+            auth::sign_in(&client, &http, scope, |url| {
                 let _ = events.try_send(Event::OpenUri(url.to_string()));
                 Ok(())
             })
@@ -293,7 +345,8 @@ impl Worker {
             Ok(account) => account,
             Err(err) => return self.emit(Event::SignInFailed(err.to_string())),
         };
-        if let Err(err) = credentials::save_refresh_token(SCOPE, &refresh_token).await {
+        let scope = self.sign_in_scope;
+        if let Err(err) = credentials::save_refresh_token(scope, &refresh_token).await {
             tracing::error!(%err, "couldn't save the sign-in");
             return self.emit(Event::SignInFailed(
                 "Aerie couldn't save your sign-in to the system keyring.".into(),
@@ -314,8 +367,14 @@ impl Worker {
             return self.emit(Event::Problem(err.to_string()));
         }
         tracing::info!(account = %redact::email(&account.email), "signed in");
+        // A write grant supersedes the read-only one.
+        let (read, write) = scopes();
+        if scope == write && read != write {
+            let _ = credentials::delete_refresh_token(read).await;
+        }
         self.session = Some(Session {
             account: account.id.clone(),
+            scope,
             refresh_token,
             drive,
             expires_at: tokens.expires_at,
@@ -328,8 +387,11 @@ impl Worker {
         if let Some(session) = self.session.take() {
             let _ = self.store().forget_account(&session.account);
         }
-        if let Err(err) = credentials::delete_refresh_token(SCOPE).await {
-            tracing::warn!(%err, "couldn't remove the sign-in from the keyring");
+        let (read, write) = scopes();
+        for scope in [read, write] {
+            if let Err(err) = credentials::delete_refresh_token(scope).await {
+                tracing::warn!(%err, "couldn't remove the sign-in from the keyring");
+            }
         }
         tracing::info!("signed out");
         self.emit(Event::SignedOut);
@@ -358,8 +420,9 @@ impl Worker {
             }
             Err(DriveError::SignInExpired) => {
                 tracing::info!("sign-in expired");
-                self.session = None;
-                let _ = credentials::delete_refresh_token(SCOPE).await;
+                if let Some(session) = self.session.take() {
+                    let _ = credentials::delete_refresh_token(session.scope).await;
+                }
                 self.emit(Event::NeedsSignIn { expired: true });
             }
             Err(err) => {
@@ -399,15 +462,94 @@ impl Worker {
         Ok(())
     }
 
+    /// Runs a file action and records its result locally at once; the change log confirms
+    /// it later. Read-only sessions ask the UI to obtain write access first.
+    async fn act(&mut self, action: Command) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        if session.scope == scopes().0 && scopes().0 != scopes().1 {
+            return self.emit(Event::NeedsWriteAccess);
+        }
+        if let Err(err) = self.ensure_token().await {
+            return self.report(err);
+        }
+        let session = self.session.as_ref().expect("checked above");
+        let drive = &session.drive;
+        let account = session.account.clone();
+        let result = match &action {
+            Command::CreateFolder { parent, name } => drive
+                .create_folder(parent, name)
+                .await
+                .map(|entry| (Change::Upsert(entry), format!("Created “{name}”"), None)),
+            Command::Rename { id, name } => drive
+                .rename(id, name)
+                .await
+                .map(|entry| (Change::Upsert(entry), format!("Renamed to “{name}”"), None)),
+            Command::Move { id, from, to } => drive.move_to(id, from, to).await.map(|entry| {
+                let message = format!("Moved “{}”", entry.name);
+                (Change::Upsert(entry), message, None)
+            }),
+            Command::Trash { id } => drive.trash(id).await.map(|entry| {
+                (
+                    Change::Removed(entry.id.clone()),
+                    format!("Moved “{}” to the trash", entry.name),
+                    Some(entry.id),
+                )
+            }),
+            Command::Untrash { id } => drive.untrash(id).await.map(|entry| {
+                let message = format!("Restored “{}”", entry.name);
+                (Change::Upsert(entry), message, None)
+            }),
+            _ => return,
+        };
+        match result {
+            Ok((change, message, undo)) => {
+                if let Err(err) = self.store().apply_local(&account, &[change]) {
+                    tracing::error!(%err, "couldn't record a file action");
+                }
+                self.poll_delay = FASTEST_POLL;
+                self.emit(Event::CatalogChanged);
+                self.emit(Event::Done { message, undo });
+            }
+            Err(err) => self.report(err),
+        }
+    }
+
+    fn report(&mut self, err: DriveError) {
+        tracing::warn!(%err, "file action failed");
+        let message = match &err {
+            _ if err.is_offline() => "You’re offline. Try again when you’re connected.".to_owned(),
+            DriveError::SignInExpired => {
+                "Your sign-in expired. Sign in again to continue.".to_owned()
+            }
+            DriveError::Api {
+                status: 403,
+                message,
+            } => format!("Google Drive didn’t allow that: {message}"),
+            DriveError::Api { status: 404, .. } => {
+                "That item is no longer in your Drive.".to_owned()
+            }
+            other => format!("That didn’t work: {other}"),
+        };
+        self.emit(Event::Problem(message));
+    }
+
     /// Lists everything, seeding the change cursor first so edits made meanwhile replay.
     async fn inventory(&mut self, account: &str) -> aerie_drive::Result<()> {
         let session = self.session.as_ref().expect("checked by caller");
         let cursor = session.drive.start_page_token().await?;
-        let root = session.drive.root_id().await?;
+        // `drive.file` can't read the root folder itself; the root is inferred below.
+        let root = match session.drive.root_id().await {
+            Ok(root) => Some(root),
+            Err(DriveError::Api { status: 404, .. }) => None,
+            Err(err) => return Err(err),
+        };
+        let placeholder = DriveFileId::new("root");
         self.store
             .as_mut()
             .expect("store is open")
-            .begin_inventory(account, &root, &cursor)
+            .begin_inventory(account, root.as_ref().unwrap_or(&placeholder), &cursor)
             .map_err(store_problem)?;
 
         let mut files = 0u64;
@@ -441,6 +583,12 @@ impl Worker {
             .expect("store is open")
             .finish_inventory(account)
             .map_err(store_problem)?;
+        if root.is_none() {
+            let store = self.store.as_ref().expect("store is open");
+            if let Ok(Some(inferred)) = store.likely_root(account) {
+                store.set_root(account, &inferred).map_err(store_problem)?;
+            }
+        }
         tracing::info!(files, "inventory complete");
         self.emit(Event::CatalogChanged);
         Ok(())

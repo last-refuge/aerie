@@ -12,6 +12,9 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Search My Drive", "<Control>k"),
             ("New folder", "<Control><Shift>n"),
+            ("Rename", "F2"),
+            ("Move to…", "<Control>m"),
+            ("Move to trash", "Delete"),
             ("Open the selected folder", "Return"),
         ],
     ),

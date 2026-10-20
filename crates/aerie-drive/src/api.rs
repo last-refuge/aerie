@@ -1,6 +1,6 @@
 //! Drive API v3 requests used by the browser.
 
-use aerie_core::{Change, DriveFileId, FileEntry, FileKind};
+use aerie_core::{Capabilities, Change, DriveFileId, FileEntry, FileKind};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -9,7 +9,8 @@ use crate::{Error, Result};
 
 const API: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API: &str = "https://www.googleapis.com/upload/drive/v3";
-pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed";
+pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed,\
+capabilities(canRename,canTrash,canAddChildren,canMoveItemWithinDrive,canDownload,canEdit)";
 
 /// The signed-in Google account.
 #[derive(Debug, Deserialize)]
@@ -258,6 +259,63 @@ impl DriveApi {
         Ok(response.json::<RemoteFile>().await?.into_entry())
     }
 
+    pub async fn rename(&self, id: &DriveFileId, name: &str) -> Result<FileEntry> {
+        self.update(id, serde_json::json!({ "name": name }), &[])
+            .await
+    }
+
+    /// Moves an item from one folder to another.
+    pub async fn move_to(
+        &self,
+        id: &DriveFileId,
+        from: &DriveFileId,
+        to: &DriveFileId,
+    ) -> Result<FileEntry> {
+        self.update(
+            id,
+            serde_json::json!({}),
+            &[
+                ("addParents", to.as_str()),
+                ("removeParents", from.as_str()),
+            ],
+        )
+        .await
+    }
+
+    /// Moves an item to Drive's trash, where it stays recoverable. Aerie never deletes
+    /// permanently.
+    pub async fn trash(&self, id: &DriveFileId) -> Result<FileEntry> {
+        self.update(id, serde_json::json!({ "trashed": true }), &[])
+            .await
+    }
+
+    pub async fn untrash(&self, id: &DriveFileId) -> Result<FileEntry> {
+        self.update(id, serde_json::json!({ "trashed": false }), &[])
+            .await
+    }
+
+    async fn update(
+        &self,
+        id: &DriveFileId,
+        metadata: serde_json::Value,
+        params: &[(&str, &str)],
+    ) -> Result<FileEntry> {
+        let response = self
+            .http
+            .patch(format!("{}/files/{}", self.api_base, id.as_str()))
+            .bearer_auth(&self.access_token)
+            .query(&[("fields", FILE)])
+            .query(params)
+            .json(&metadata)
+            .send()
+            .await?;
+        tracing::debug!(status = response.status().as_u16(), "Drive update");
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+        Ok(response.json::<RemoteFile>().await?.into_entry())
+    }
+
     /// Downloads an ordinary file's content. Google-native documents need an export instead.
     pub async fn download(&self, id: &DriveFileId) -> Result<Vec<u8>> {
         let response = self
@@ -447,6 +505,19 @@ pub(crate) struct RemoteFile {
     parents: Vec<String>,
     #[serde(default)]
     trashed: bool,
+    #[serde(default)]
+    capabilities: RemoteCapabilities,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct RemoteCapabilities {
+    can_rename: bool,
+    can_trash: bool,
+    can_add_children: bool,
+    can_move_item_within_drive: bool,
+    can_download: bool,
+    can_edit: bool,
 }
 
 #[derive(Deserialize)]
@@ -475,13 +546,23 @@ impl RemoteChange {
 
 impl RemoteFile {
     pub(crate) fn into_entry(self) -> FileEntry {
+        let can = &self.capabilities;
         FileEntry {
+            can: Capabilities {
+                rename: can.can_rename,
+                trash: can.can_trash,
+                add_children: can.can_add_children,
+                move_item: can.can_move_item_within_drive,
+                download: can.can_download,
+                edit: can.can_edit,
+            },
             kind: kind_for_mime(&self.mime_type),
             size: self.size.and_then(|size| size.parse().ok()),
             modified: self.modified_time.as_deref().map_or(0, unix_seconds),
             parent: self.parents.into_iter().next().map(DriveFileId::new),
             id: DriveFileId::new(self.id),
             name: self.name,
+            mime_type: self.mime_type,
         }
     }
 }

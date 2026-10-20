@@ -192,6 +192,8 @@ mod tests {
             kind,
             size: None,
             modified: 0,
+            mime_type: String::new(),
+            can: crate::Capabilities::ALL,
         }
     }
 
