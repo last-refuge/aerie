@@ -77,6 +77,8 @@ const MIGRATIONS: &[&str] = &[
         inode INTEGER NOT NULL,
         PRIMARY KEY (account_id, remote_id)
     );",
+    // 5: shared drives join the inventory, so existing caches index again.
+    "UPDATE accounts SET inventory_complete = 0;",
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {
