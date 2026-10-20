@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ai.lastrefuge.Aerie</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Aerie</name>
+  <summary>Google Drive for Linux</summary>
+  <description>
+    <p>Aerie brings Google Drive to the Linux desktop with a native, fast and quiet experience.</p>
+    <p>Browse and search My Drive, move files in and out, and keep chosen folders in sync. Aerie talks to Google directly from your computer; no other service sees your files or sign-in.</p>
+  </description>
+  <launchable type="desktop-id">ai.lastrefuge.Aerie.desktop</launchable>
+  <developer id="ai.lastrefuge">
+    <name>Last Refuge</name>
+  </developer>
+  <url type="homepage">https://github.com/last-refuge/aerie</url>
+  <url type="bugtracker">https://github.com/last-refuge/aerie/issues</url>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <internet>always</internet>
+  </requires>
+  <releases>
+    <release version="0.1.0" date="2026-10-20">
+      <description>
+        <p>First development build.</p>
+      </description>
+    </release>
+  </releases>
+</component>

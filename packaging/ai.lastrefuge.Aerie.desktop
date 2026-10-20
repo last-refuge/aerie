@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Aerie
+GenericName=Google Drive Client
+Comment=Your cloud, at home on Linux.
+Exec=aerie
+Icon=ai.lastrefuge.Aerie
+Terminal=false
+Categories=Network;FileTransfer;GTK;
+Keywords=google;drive;cloud;sync;files;
+StartupNotify=true
+StartupWMClass=ai.lastrefuge.Aerie
