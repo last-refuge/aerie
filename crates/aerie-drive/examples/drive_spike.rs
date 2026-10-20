@@ -19,7 +19,7 @@ const SLOWEST_POLL: Duration = Duration::from_secs(60);
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     if std::env::args().any(|arg| arg == "--sign-out") {
-        credentials::delete_refresh_token().await?;
+        credentials::delete_refresh_token(DRIVE_READONLY).await?;
         println!("Signed out. The sign-in was removed from the system keyring.");
         return Ok(());
     }
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Error> {
     let client = OAuthClient::load(&OAuthClient::default_path())?;
     let http = http_client()?;
 
-    let (tokens, refresh_token) = match credentials::load_refresh_token().await? {
+    let (tokens, refresh_token) = match credentials::load_refresh_token(DRIVE_READONLY).await? {
         Some(refresh_token) => match auth::refresh(&client, &http, &refresh_token).await {
             Ok(tokens) => {
                 println!("Using the saved sign-in.");
@@ -138,7 +138,7 @@ async fn sign_in(
     .await?;
     let refresh_token = tokens.refresh_token.clone();
     match &refresh_token {
-        Some(token) => credentials::save_refresh_token(token).await?,
+        Some(token) => credentials::save_refresh_token(DRIVE_READONLY, token).await?,
         None => println!("Google didn't return a refresh token; you'll sign in again next run."),
     }
     Ok((tokens, refresh_token))

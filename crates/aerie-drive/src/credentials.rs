@@ -7,25 +7,27 @@ use crate::Result;
 
 const LABEL: &str = "Aerie Google Drive sign-in";
 
-fn attributes() -> HashMap<&'static str, &'static str> {
+/// One stored sign-in per OAuth scope, so a narrow test grant never replaces the main one.
+fn attributes(scope: &str) -> HashMap<&'static str, &str> {
     HashMap::from([
         ("application", "io.github.last_refuge.Aerie"),
         ("kind", "google-refresh-token"),
+        ("scope", scope),
     ])
 }
 
-pub async fn save_refresh_token(token: &str) -> Result<()> {
+pub async fn save_refresh_token(scope: &str, token: &str) -> Result<()> {
     let keyring = oo7::Keyring::new().await?;
     keyring
-        .create_item(LABEL, &attributes(), token.as_bytes(), true)
+        .create_item(LABEL, &attributes(scope), token.as_bytes(), true)
         .await?;
     Ok(())
 }
 
-pub async fn load_refresh_token() -> Result<Option<String>> {
+pub async fn load_refresh_token(scope: &str) -> Result<Option<String>> {
     let keyring = oo7::Keyring::new().await?;
     let Some(item) = keyring
-        .search_items(&attributes())
+        .search_items(&attributes(scope))
         .await?
         .into_iter()
         .next()
@@ -37,7 +39,10 @@ pub async fn load_refresh_token() -> Result<Option<String>> {
 }
 
 /// Removes the stored sign-in. Files already on disk are untouched.
-pub async fn delete_refresh_token() -> Result<()> {
-    oo7::Keyring::new().await?.delete(&attributes()).await?;
+pub async fn delete_refresh_token(scope: &str) -> Result<()> {
+    oo7::Keyring::new()
+        .await?
+        .delete(&attributes(scope))
+        .await?;
     Ok(())
 }

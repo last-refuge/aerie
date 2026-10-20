@@ -19,6 +19,19 @@ pub struct Account {
     pub email_address: String,
 }
 
+const FOLDER_MIME: &str = "application/vnd.google-apps.folder";
+
+/// Remote identity of a file's content. `version` increases on every change to the file,
+/// including metadata; `md5_checksum` and `head_revision_id` change only with content.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteVersion {
+    pub version: String,
+    pub md5_checksum: Option<String>,
+    pub head_revision_id: Option<String>,
+    pub modified_time: Option<String>,
+}
+
 /// One page of the change log.
 #[derive(Debug)]
 pub struct ChangePage {
@@ -112,6 +125,75 @@ impl DriveApi {
                 None => return Ok(entries),
             }
         }
+    }
+
+    /// Finds an untrashed folder by name directly inside `parent`.
+    pub async fn find_folder(&self, parent: &DriveFileId, name: &str) -> Result<Option<FileEntry>> {
+        let fields = format!("files({FILE})");
+        let query = format!(
+            "'{}' in parents and name = '{}' and mimeType = '{FOLDER_MIME}' and trashed = false",
+            escape(parent.as_str()),
+            escape(name)
+        );
+        #[derive(Deserialize)]
+        struct Page {
+            #[serde(default)]
+            files: Vec<RemoteFile>,
+        }
+        let page: Page = self
+            .get(
+                "files",
+                &[
+                    ("q", query.as_str()),
+                    ("fields", fields.as_str()),
+                    ("spaces", "drive"),
+                ],
+            )
+            .await?;
+        Ok(page.files.into_iter().next().map(RemoteFile::into_entry))
+    }
+
+    pub async fn create_folder(&self, parent: &DriveFileId, name: &str) -> Result<FileEntry> {
+        let response = self
+            .http
+            .post(format!("{}/files", self.api_base))
+            .bearer_auth(&self.access_token)
+            .query(&[("fields", FILE)])
+            .json(&serde_json::json!({
+                "name": name,
+                "mimeType": FOLDER_MIME,
+                "parents": [parent.as_str()],
+            }))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+        Ok(response.json::<RemoteFile>().await?.into_entry())
+    }
+
+    /// Downloads an ordinary file's content. Google-native documents need an export instead.
+    pub async fn download(&self, id: &DriveFileId) -> Result<Vec<u8>> {
+        let response = self
+            .http
+            .get(format!("{}/files/{}", self.api_base, id.as_str()))
+            .bearer_auth(&self.access_token)
+            .query(&[("alt", "media")])
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+        Ok(response.bytes().await?.to_vec())
+    }
+
+    /// What identifies the current remote content, for comparing against a sync baseline.
+    pub async fn version(&self, id: &DriveFileId) -> Result<RemoteVersion> {
+        self.get(
+            &format!("files/{}", id.as_str()),
+            &[("fields", "version,md5Checksum,headRevisionId,modifiedTime")],
+        )
+        .await
     }
 
     /// The My Drive root's real ID. Listings report it as the parent, not `"root"`.
@@ -272,7 +354,7 @@ impl RemoteFile {
 
 fn kind_for_mime(mime: &str) -> FileKind {
     match mime {
-        "application/vnd.google-apps.folder" => FileKind::Folder,
+        FOLDER_MIME => FileKind::Folder,
         "application/pdf" => FileKind::Pdf,
         "application/vnd.google-apps.document"
         | "application/msword"
