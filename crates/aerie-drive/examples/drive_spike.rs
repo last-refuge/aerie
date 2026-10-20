@@ -51,7 +51,9 @@ async fn main() -> Result<(), Error> {
     );
 
     // Seed the change cursor before listing, so edits made mid-listing are replayed.
-    let mut cursor = drive.start_page_token().await?;
+    let mut cursor = drive
+        .start_page_token(&aerie_drive::api::Feed::Everything)
+        .await?;
     let root = drive.root_id().await?;
     let mut files = drive.list_children(&root).await?;
     files.sort_by(|a, b| {
@@ -95,7 +97,9 @@ async fn main() -> Result<(), Error> {
         let mut seen = 0;
         let mut page_token = cursor.clone();
         loop {
-            let page = drive.changes(&page_token).await?;
+            let page = drive
+                .changes(&aerie_drive::api::Feed::Everything, &page_token)
+                .await?;
             for change in page.changes {
                 seen += 1;
                 match &change {

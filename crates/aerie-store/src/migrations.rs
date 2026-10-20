@@ -79,6 +79,21 @@ const MIGRATIONS: &[&str] = &[
     );",
     // 5: shared drives join the inventory, so existing caches index again.
     "UPDATE accounts SET inventory_complete = 0;",
+    // 6: which shared drive each item is in, and which drives to keep indexed.
+    "ALTER TABLE files ADD COLUMN drive_id TEXT;
+    ALTER TABLE accounts ADD COLUMN index_all_drives INTEGER NOT NULL DEFAULT 1;
+    CREATE TABLE indexed_drives (
+        account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+        drive_id TEXT NOT NULL,
+        PRIMARY KEY (account_id, drive_id)
+    );
+    CREATE TABLE drive_cursors (
+        account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+        drive_id TEXT NOT NULL,
+        cursor TEXT NOT NULL,
+        PRIMARY KEY (account_id, drive_id)
+    );
+    UPDATE accounts SET inventory_complete = 0;",
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

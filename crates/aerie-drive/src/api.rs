@@ -9,7 +9,7 @@ use crate::{Error, Result};
 
 const API: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API: &str = "https://www.googleapis.com/upload/drive/v3";
-pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed,md5Checksum,headRevisionId,\
+pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed,md5Checksum,headRevisionId,driveId,\
 capabilities(canRename,canTrash,canAddChildren,canMoveItemWithinDrive,canDownload,canEdit)";
 
 /// The signed-in Google account.
@@ -86,6 +86,17 @@ pub fn intervening_revisions(
     }
 }
 
+/// Which change feed to read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Feed {
+    /// My Drive and every shared drive, in one feed.
+    Everything,
+    /// My Drive and items shared with the user, without shared drives.
+    MyDrive,
+    /// One shared drive's own feed.
+    SharedDrive(DriveFileId),
+}
+
 /// Which set of items an inventory lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Corpus {
@@ -122,6 +133,7 @@ impl SharedDrive {
             },
             md5: None,
             head_revision: None,
+            drive: Some(self.id.clone()),
         }
     }
 }
@@ -294,6 +306,73 @@ impl DriveApi {
             page.files.into_iter().map(RemoteFile::into_entry).collect(),
             page.next_page_token,
         ))
+    }
+
+    /// Lists a folder inside a shared drive, for browsing a drive that isn't indexed.
+    pub async fn list_drive_folder(
+        &self,
+        drive: &DriveFileId,
+        folder: &DriveFileId,
+    ) -> Result<Vec<FileEntry>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Page {
+            next_page_token: Option<String>,
+            #[serde(default)]
+            files: Vec<RemoteFile>,
+        }
+        let fields = format!("nextPageToken,files({FILE})");
+        let query = format!(
+            "'{}' in parents and trashed = false",
+            escape(folder.as_str())
+        );
+        let mut entries = Vec::new();
+        let mut page_token = None::<String>;
+        loop {
+            let mut params = vec![
+                ("q", query.as_str()),
+                ("fields", fields.as_str()),
+                ("pageSize", "1000"),
+                ("corpora", "drive"),
+                ("driveId", drive.as_str()),
+                ("includeItemsFromAllDrives", "true"),
+            ];
+            if let Some(token) = &page_token {
+                params.push(("pageToken", token));
+            }
+            let page: Page = self.get("files", &params).await?;
+            entries.extend(page.files.into_iter().map(RemoteFile::into_entry));
+            match page.next_page_token {
+                Some(token) => page_token = Some(token),
+                None => return Ok(entries),
+            }
+        }
+    }
+
+    /// Asks Google's own search for names containing `text`, across everything the user
+    /// can see. Used for drives that aren't indexed locally; results may be partial.
+    pub async fn search_names(&self, text: &str, limit: usize) -> Result<Vec<FileEntry>> {
+        #[derive(Deserialize)]
+        struct Page {
+            #[serde(default)]
+            files: Vec<RemoteFile>,
+        }
+        let fields = format!("files({FILE})");
+        let query = format!("name contains '{}' and trashed = false", escape(text));
+        let limit = limit.min(1000).to_string();
+        let page: Page = self
+            .get(
+                "files",
+                &[
+                    ("q", query.as_str()),
+                    ("fields", fields.as_str()),
+                    ("pageSize", limit.as_str()),
+                    ("corpora", "allDrives"),
+                    ("includeItemsFromAllDrives", "true"),
+                ],
+            )
+            .await?;
+        Ok(page.files.into_iter().map(RemoteFile::into_entry).collect())
     }
 
     /// Finds an untrashed folder by name directly inside `parent`.
@@ -476,13 +555,17 @@ impl DriveApi {
 
     /// A cursor for changes made from now on. Fetch it before an initial listing, so
     /// changes made during the listing are replayed rather than lost.
-    pub async fn start_page_token(&self) -> Result<String> {
+    pub async fn start_page_token(&self, feed: &Feed) -> Result<String> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Start {
             start_page_token: String,
         }
-        let start: Start = self.get("changes/startPageToken", &[]).await?;
+        let params: Vec<(&str, &str)> = match feed {
+            Feed::SharedDrive(id) => vec![("driveId", id.as_str())],
+            Feed::Everything | Feed::MyDrive => vec![],
+        };
+        let start: Start = self.get("changes/startPageToken", &params).await?;
         Ok(start.start_page_token)
     }
 
@@ -519,7 +602,7 @@ impl DriveApi {
 
     /// Reads one page of changes across My Drive and shared drives. Persist the page's changes and its cursor
     /// together, then continue from the cursor.
-    pub async fn changes(&self, page_token: &str) -> Result<ChangePage> {
+    pub async fn changes(&self, feed: &Feed, page_token: &str) -> Result<ChangePage> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Page {
@@ -533,19 +616,24 @@ impl DriveApi {
             "nextPageToken,newStartPageToken,changes(changeType,fileId,driveId,removed,\
              file({FILE}),drive(id,name,capabilities(canAddChildren)))"
         );
-        let page: Page = self
-            .get(
-                "changes",
-                &[
-                    ("pageToken", page_token),
-                    ("fields", fields.as_str()),
-                    ("pageSize", "1000"),
-                    ("spaces", "drive"),
-                    ("includeRemoved", "true"),
+        let mut params = vec![
+            ("pageToken", page_token),
+            ("fields", fields.as_str()),
+            ("pageSize", "1000"),
+            ("spaces", "drive"),
+            ("includeRemoved", "true"),
+        ];
+        match feed {
+            Feed::Everything => params.push(("includeItemsFromAllDrives", "true")),
+            Feed::MyDrive => params.push(("includeItemsFromAllDrives", "false")),
+            Feed::SharedDrive(id) => {
+                params.extend([
+                    ("driveId", id.as_str()),
                     ("includeItemsFromAllDrives", "true"),
-                ],
-            )
-            .await?;
+                ]);
+            }
+        }
+        let page: Page = self.get("changes", &params).await?;
         let next = match (page.next_page_token, page.new_start_page_token) {
             (Some(token), _) => ChangeCursor::MorePages(token),
             (None, Some(token)) => ChangeCursor::CaughtUp(token),
@@ -634,6 +722,7 @@ pub(crate) struct RemoteFile {
     capabilities: RemoteCapabilities,
     md5_checksum: Option<String>,
     head_revision_id: Option<String>,
+    drive_id: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -703,6 +792,7 @@ impl RemoteFile {
             mime_type: self.mime_type,
             md5: self.md5_checksum,
             head_revision: self.head_revision_id,
+            drive: self.drive_id.map(DriveFileId::new),
         }
     }
 }

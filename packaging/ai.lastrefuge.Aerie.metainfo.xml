@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.3.0" date="2026-10-20">
+      <description>
+        <p>Choose which shared drives to index; others load on demand.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-20">
       <description>
         <p>The Aerie look, shared drives, a separate sync service and sync badges on folders.</p>

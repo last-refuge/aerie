@@ -52,6 +52,7 @@ pub fn sample_entries() -> Vec<FileEntry> {
             mime_type: String::new(),
             md5: None,
             head_revision: None,
+            drive: None,
             can: Capabilities::ALL,
         })
         .collect()

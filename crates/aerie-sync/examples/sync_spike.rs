@@ -194,7 +194,9 @@ async fn run(
     root: &Path,
     quarantine: &Path,
 ) -> Result<cycle::Report, Error> {
-    let cursor = drive.start_page_token().await?;
+    let cursor = drive
+        .start_page_token(&aerie_drive::api::Feed::Everything)
+        .await?;
     store.begin_inventory(account, &DriveFileId::new("root"), &cursor)?;
     let mut page = None;
     loop {
