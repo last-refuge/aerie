@@ -413,7 +413,7 @@ impl Worker {
     }
 
     async fn fetch_account(&mut self, session: &mut Session) -> aerie_drive::Result<Account> {
-        let client = OAuthClient::load(&OAuthClient::default_path())?;
+        let client = OAuthClient::configured()?;
         let tokens = auth::refresh(&client, &http_client()?, &session.refresh_token).await?;
         session.drive.set_access_token(tokens.access_token);
         session.expires_at = tokens.expires_at;
@@ -434,7 +434,7 @@ impl Worker {
         let (read, write_scope) = scopes();
         let scope = if write { write_scope } else { read };
         self.sign_in_scope = scope;
-        let client = match OAuthClient::load(&OAuthClient::default_path()) {
+        let client = match OAuthClient::configured() {
             Ok(client) => client,
             Err(err) => {
                 tracing::error!(%err, "no OAuth client file");
@@ -594,7 +594,7 @@ impl Worker {
         if fresh {
             return Ok(());
         }
-        let client = OAuthClient::load(&OAuthClient::default_path())?;
+        let client = OAuthClient::configured()?;
         let http = http_client()?;
         let tokens = auth::refresh(&client, &http, &session.refresh_token).await?;
         session.drive.set_access_token(tokens.access_token);

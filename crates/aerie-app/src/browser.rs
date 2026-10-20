@@ -18,7 +18,9 @@ use crate::fixtures::{self, ROOT_ID};
 use crate::sync_page::SyncPage;
 use crate::transfers_page::TransfersPage;
 
-pub fn build_window(app: &adw::Application) {
+/// Opens the main window, or builds it hidden when Aerie starts in the background at
+/// login. A hidden start with nothing to sync quits once that's known.
+pub fn build_window(app: &adw::Application, present: bool) {
     // A window hidden while sync runs in the background comes back.
     if let Some(window) = app.windows().first() {
         window.present();
@@ -97,6 +99,18 @@ pub fn build_window(app: &adw::Application) {
                     browser.set_background(&window, settings.as_ref().is_some_and(|s| !s.paused));
                     sync.show(settings, roots, folders);
                 }
+                // Started in the background with nothing to keep running for: exit.
+                let idle = matches!(
+                    event,
+                    Event::Sync(crate::engine::SyncState::Off) | Event::NeedsSignIn { .. }
+                );
+                if idle && !window.is_visible() {
+                    tracing::info!("nothing to run in the background; exiting");
+                    browser.set_background(&window, false);
+                    if let Some(app) = window.application() {
+                        app.quit();
+                    }
+                }
                 match event {
                     Event::TransferProgress { id, done, total } => {
                         transfers.progress(id, done, total)
@@ -122,7 +136,20 @@ pub fn build_window(app: &adw::Application) {
         }
     ));
 
-    window.present();
+    // Closing the window quits, unless sync keeps Aerie running in the background. An
+    // explicit quit avoids lingering when widgets still hold references to the window.
+    window.connect_close_request(|window| {
+        if !window.hides_on_close()
+            && let Some(app) = window.application()
+        {
+            app.quit();
+        }
+        glib::Propagation::Proceed
+    });
+
+    if present {
+        window.present();
+    }
 }
 
 fn install_actions(

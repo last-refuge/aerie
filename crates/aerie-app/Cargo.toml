@@ -19,6 +19,7 @@ aerie-sync.workspace = true
 async-channel.workspace = true
 gtk.workspace = true
 notify.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
