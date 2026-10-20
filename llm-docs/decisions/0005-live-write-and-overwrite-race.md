@@ -4,7 +4,7 @@
 
 ## Setup
 
-`cargo run -p aerie-drive --example write_spike` signs in with `drive.file`, which only reaches files Aerie creates. It works in a "Aerie test" folder on a real account. The sign-in is stored separately per scope, so the narrow test grant never replaces the read-only one. Under `drive.file` the root folder itself isn't readable, so the spike addresses it by the `root` alias rather than its resolved ID.
+`cargo run -p aerie-drive --example write_spike` signs in with `drive.file`, which only reaches files Aerie creates. It works in an "Aerie test" folder on a real account. The sign-in is stored separately per scope, so the narrow test grant never replaces the read-only one. Under `drive.file` the root folder itself isn't readable, so the spike addresses it by the `root` alias rather than its resolved ID.
 
 ## Results
 
