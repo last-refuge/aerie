@@ -5,14 +5,13 @@ pkgrel=1
 pkgdesc="Google Drive for Linux"
 arch=('x86_64' 'aarch64')
 url="https://github.com/last-refuge/aerie"
-license=('MIT')
-depends=('gtk4' 'libadwaita' 'gcc-libs' 'glibc')
+license=('MIT' 'OFL-1.1' 'ISC')
+# GTK 4.20 draws the stroke-style Lucide icons Aerie uses.
+depends=('gtk4>=1:4.20' 'libadwaita' 'pango>=1:1.56' 'gcc-libs' 'glibc')
 makedepends=('cargo')
 # makepkg's link-time optimization breaks C code built inside Rust crates (ring, SQLite).
 options=('!lto')
 optdepends=(
-  'inter-font: the interface typeface'
-  'ttf-jetbrains-mono: technical labels'
   'gnome-keyring: stores your sign-in (any Secret Service provider works)'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
@@ -31,6 +30,7 @@ build() {
   # Packagers may build in a public Google OAuth client by exporting
   # AERIE_OAUTH_CLIENT_ID and AERIE_OAUTH_CLIENT_SECRET. Without them, Aerie reads
   # ~/.config/aerie/oauth-client.json.
+  export AERIE_DATA_DIR=/usr/share/aerie
   cargo build --frozen --release -p aerie-app
 }
 
@@ -51,5 +51,14 @@ package() {
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/ai.lastrefuge.Aerie.svg"
   install -Dm644 assets/icons/hicolor/symbolic/apps/ai.lastrefuge.Aerie-symbolic.svg \
     "$pkgdir/usr/share/icons/hicolor/symbolic/apps/ai.lastrefuge.Aerie-symbolic.svg"
+  install -Dm644 assets/icons/hicolor/scalable/apps/ai.lastrefuge.Aerie-mark.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/ai.lastrefuge.Aerie-mark.svg"
+  install -Dm644 -t "$pkgdir/usr/share/icons/hicolor/scalable/actions" \
+    assets/icons/hicolor/scalable/actions/aerie-*-symbolic.svg
+  install -Dm644 -t "$pkgdir/usr/share/aerie/fonts" assets/fonts/*.ttf
+  install -Dm644 assets/fonts/LICENSE-Inter.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE-Inter.txt"
+  install -Dm644 assets/fonts/LICENSE-JetBrainsMono.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-JetBrainsMono.txt"
+  install -Dm644 assets/icons/LICENSE-lucide.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE-lucide.txt"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

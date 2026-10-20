@@ -46,7 +46,7 @@ impl TransfersPage {
             .child(&clamp)
             .build();
         let empty = adw::StatusPage::builder()
-            .icon_name("folder-download-symbolic")
+            .icon_name("aerie-arrow-down-up-symbolic")
             .title("No transfers")
             .description(
                 "Uploads and downloads appear here. Drop files on My Drive to upload them.",
@@ -128,8 +128,8 @@ impl TransfersPage {
             .subtitle(status_text(transfer))
             .build();
         row.add_prefix(&gtk::Image::from_icon_name(match transfer.direction {
-            Direction::Upload => "go-up-symbolic",
-            Direction::Download => "go-down-symbolic",
+            Direction::Upload => "aerie-arrow-up-symbolic",
+            Direction::Download => "aerie-arrow-down-symbolic",
         }));
         let progress = gtk::ProgressBar::builder()
             .valign(gtk::Align::Center)
@@ -153,32 +153,24 @@ impl TransfersPage {
         };
         match transfer.state {
             TransferState::Queued | TransferState::Running => {
-                button(
-                    "media-playback-pause-symbolic",
-                    "Pause",
-                    Command::PauseTransfer,
-                );
-                button("process-stop-symbolic", "Cancel", Command::CancelTransfer);
+                button("aerie-pause-symbolic", "Pause", Command::PauseTransfer);
+                button("aerie-x-symbolic", "Cancel", Command::CancelTransfer);
             }
             TransferState::Paused => {
-                button(
-                    "media-playback-start-symbolic",
-                    "Resume",
-                    Command::ResumeTransfer,
-                );
-                button("process-stop-symbolic", "Cancel", Command::CancelTransfer);
+                button("aerie-play-symbolic", "Resume", Command::ResumeTransfer);
+                button("aerie-x-symbolic", "Cancel", Command::CancelTransfer);
             }
             TransferState::Failed => {
                 button(
-                    "view-refresh-symbolic",
+                    "aerie-rotate-cw-symbolic",
                     "Try Again",
                     Command::ResumeTransfer,
                 );
-                button("process-stop-symbolic", "Cancel", Command::CancelTransfer);
+                button("aerie-x-symbolic", "Cancel", Command::CancelTransfer);
             }
             TransferState::Done if transfer.direction == Direction::Download => {
                 let open = gtk::Button::builder()
-                    .icon_name("document-open-symbolic")
+                    .icon_name("aerie-external-link-symbolic")
                     .tooltip_text("Open")
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])
@@ -194,7 +186,7 @@ impl TransfersPage {
                 });
                 row.add_suffix(&open);
                 let reveal = gtk::Button::builder()
-                    .icon_name("folder-open-symbolic")
+                    .icon_name("aerie-folder-open-symbolic")
                     .tooltip_text("Show in Folder")
                     .valign(gtk::Align::Center)
                     .css_classes(["flat"])

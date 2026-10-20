@@ -79,7 +79,7 @@ pub fn button() -> gtk::MenuButton {
     menu.append(Some("About Aerie"), Some("app.about"));
     menu.append(Some("Quit"), Some("app.quit"));
     gtk::MenuButton::builder()
-        .icon_name("open-menu-symbolic")
+        .icon_name("aerie-menu-symbolic")
         .tooltip_text("Main menu")
         .menu_model(&menu)
         .primary(true)
