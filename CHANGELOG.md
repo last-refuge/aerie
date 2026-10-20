@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 beta
+
+A design pass to bring Aerie closer to its brand.
+
+- **The Aerie mark:** the app icon, sidebar and welcome screen use the luminous, intertwined ribbon cloud from the brand guidelines.
+- **Welcome screen:** the "Google Drive for Linux" descriptor, the "Your files, everywhere." tagline, a soft halo and horizon, and an outlined button for the sample files.
+- **File list:** taller rows, a rounded selection and a hover state; each item sits on a tile tinted by its type. Dates read "2 hours ago", "Yesterday" or a weekday, with the exact time on hover; sizes line up on the right.
+- **Shared drives:** a heading with a count that folds the section away, a filter past ten drives, pins to keep favorites on top, and a color for each drive.
+- **Status panel:** a tinted badge says how things stand ("Synced · All files up to date"), with your storage use as a bar in the brand gradient.
+
 ## 0.3.7 beta
 
 - **Resizable sidebar:** drag the sidebar's edge to make it wider or narrower; Aerie remembers the width. Double-click the edge to restore the default.

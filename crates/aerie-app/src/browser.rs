@@ -338,6 +338,7 @@ fn handle_event(
         }
         Event::Indexing { files } => browser.set_status(Status::Indexing(files)),
         Event::UpToDate => browser.set_status(Status::UpToDate),
+        Event::Storage { used, limit } => browser.set_storage(Some((used, limit))),
         Event::CatalogChanged => browser.reload(),
         Event::Offline => browser.set_status(Status::Offline),
         Event::Problem(message) => toasts.add_toast(adw::Toast::new(&message)),
@@ -516,6 +517,26 @@ impl Welcome {
     }
 }
 
+/// How the status badge is tinted.
+#[derive(Clone, Copy)]
+enum Tone {
+    Good,
+    Working,
+    Warning,
+    Off,
+}
+
+impl Tone {
+    fn class(self) -> &'static str {
+        match self {
+            Self::Good => "good",
+            Self::Working => "working",
+            Self::Warning => "warning",
+            Self::Off => "off",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Status {
     Samples,
@@ -569,6 +590,10 @@ struct Browser {
     status_icon: gtk::Image,
     status_title: gtk::Label,
     status_detail: gtk::Label,
+    /// Storage use under the status: a bar in the brand gradient and "x of y".
+    storage: gtk::Box,
+    storage_bar: gtk::ProgressBar,
+    storage_label: gtk::Label,
 }
 
 impl Browser {
@@ -718,8 +743,27 @@ impl Browser {
             content,
             empty,
             banner: adw::Banner::new(""),
-            status_icon: gtk::Image::new(),
-            status_title: gtk::Label::builder().xalign(0.0).build(),
+            status_icon: gtk::Image::builder()
+                .valign(gtk::Align::Center)
+                .css_classes(["status-badge"])
+                .build(),
+            status_title: gtk::Label::builder()
+                .xalign(0.0)
+                .css_classes(["status-title"])
+                .build(),
+            storage: gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(6)
+                .css_classes(["storage"])
+                .visible(false)
+                .build(),
+            storage_bar: gtk::ProgressBar::builder()
+                .css_classes(["storage-bar"])
+                .build(),
+            storage_label: gtk::Label::builder()
+                .xalign(0.0)
+                .css_classes(["metadata", "numeric"])
+                .build(),
             status_detail: gtk::Label::builder()
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -1253,13 +1297,19 @@ impl Browser {
         let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
         text.append(&self.status_title);
         text.append(&self.status_detail);
+        let summary = gtk::Box::builder().spacing(12).build();
+        summary.append(&self.status_icon);
+        summary.append(&text);
+        self.storage.append(&self.storage_bar);
+        self.storage.append(&self.storage_label);
         let status = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
             .spacing(12)
             .css_classes(["sync-status", "card"])
             .accessible_role(gtk::AccessibleRole::Status)
             .build();
-        status.append(&self.status_icon);
-        status.append(&text);
+        status.append(&summary);
+        status.append(&self.storage);
 
         self.drives_list.connect_row_activated(glib::clone!(
             #[weak(rename_to = browser)]
@@ -1344,7 +1394,39 @@ impl Browser {
         self.show_state();
     }
 
+    /// Shows storage use; `None` hides it.
+    fn set_storage(&self, storage: Option<(u64, Option<u64>)>) {
+        let Some((used, limit)) = storage else {
+            self.storage.set_visible(false);
+            return;
+        };
+        match limit {
+            Some(limit) if limit > 0 => {
+                let fraction = (used as f64 / limit as f64).clamp(0.0, 1.0);
+                self.storage_bar.set_fraction(fraction);
+                self.storage_bar.set_visible(true);
+                self.storage_label.set_label(&format!(
+                    "{} of {} used",
+                    format_size(used),
+                    format_size(limit)
+                ));
+                if fraction >= 0.9 {
+                    self.storage_bar.add_css_class("nearly-full");
+                } else {
+                    self.storage_bar.remove_css_class("nearly-full");
+                }
+            }
+            _ => {
+                self.storage_bar.set_visible(false);
+                self.storage_label
+                    .set_label(&format!("{} used", format_size(used)));
+            }
+        }
+        self.storage.set_visible(true);
+    }
+
     fn show_samples(self: &Rc<Self>) {
+        self.set_storage(None);
         self.state.replace(samples());
         self.account.replace(None);
         self.tree.replace(None);
@@ -1585,32 +1667,40 @@ impl Browser {
             .as_ref()
             .map(|account| account.email.clone())
             .unwrap_or_default();
-        let (icon, title, detail) = match status {
+        let (tone, icon, title, detail) = match status {
             Status::Samples => (
+                Tone::Off,
                 "aerie-cloud-off-symbolic",
                 "Not connected".to_owned(),
                 "Sample files only".to_owned(),
             ),
             Status::Indexing(0) => (
+                Tone::Working,
                 "aerie-loader-circle-symbolic",
                 "Checking for changes".to_owned(),
-                email,
+                email.clone(),
             ),
             Status::Indexing(files) => (
+                Tone::Working,
                 "aerie-loader-circle-symbolic",
                 "Indexing your Drive".to_owned(),
                 format!("{files} items so far"),
             ),
             Status::UpToDate => match self.sync_state.borrow().as_ref() {
                 Some(crate::engine::SyncState::InSync) => (
+                    Tone::Good,
                     "aerie-cloud-check-symbolic",
-                    "Everything in sync.".to_owned(),
-                    email,
+                    "Synced".to_owned(),
+                    "All files up to date".to_owned(),
                 ),
-                Some(crate::engine::SyncState::Syncing) => {
-                    ("aerie-refresh-cw-symbolic", "Syncing".to_owned(), email)
-                }
+                Some(crate::engine::SyncState::Syncing) => (
+                    Tone::Working,
+                    "aerie-refresh-cw-symbolic",
+                    "Syncing".to_owned(),
+                    "Updating your files".to_owned(),
+                ),
                 Some(crate::engine::SyncState::Paused) => (
+                    Tone::Off,
                     "aerie-pause-symbolic",
                     "Paused".to_owned(),
                     "Sync is paused".to_owned(),
@@ -1619,23 +1709,37 @@ impl Browser {
                     crate::engine::SyncState::Attention(_)
                     | crate::engine::SyncState::HeldDeletions(_),
                 ) => (
+                    Tone::Warning,
                     "aerie-triangle-alert-symbolic",
                     "Needs attention".to_owned(),
                     "Open Sync for details".to_owned(),
                 ),
-                _ => ("aerie-cloud-check-symbolic", "Up to date".to_owned(), email),
+                _ => (
+                    Tone::Good,
+                    "aerie-cloud-check-symbolic",
+                    "Up to date".to_owned(),
+                    "Your Drive is current".to_owned(),
+                ),
             },
             Status::Offline => (
+                Tone::Off,
                 "aerie-cloud-off-symbolic",
                 "Offline".to_owned(),
                 "Showing files from the last update".to_owned(),
             ),
             Status::NeedsSignIn => (
+                Tone::Warning,
                 "aerie-triangle-alert-symbolic",
                 "Needs attention".to_owned(),
                 "Sign in again to stay up to date".to_owned(),
             ),
         };
+        self.status_icon
+            .set_css_classes(&["status-badge", tone.class()]);
+        // The account shows on hover; the card itself says how things stand.
+        let account = (!email.is_empty()).then_some(email.as_str());
+        self.status_title.set_tooltip_text(account);
+        self.status_detail.set_tooltip_text(account);
         self.status_icon.set_icon_name(Some(icon));
         self.status_title.set_label(&title);
         self.status_detail.set_label(&detail);
@@ -2245,7 +2349,7 @@ fn text_factory(
             Align::Start => label.set_xalign(0.0),
             Align::End => {
                 label.set_xalign(1.0);
-                label.set_margin_end(8);
+                label.set_margin_end(14);
             }
         }
         list_item(item).set_child(Some(&label));
