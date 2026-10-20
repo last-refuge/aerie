@@ -80,7 +80,12 @@ fn data_dir() -> std::path::PathBuf {
 fn add_dev_icons() {
     if cfg!(debug_assertions) {
         let display = gdk::Display::default().expect("a display is available");
-        gtk::IconTheme::for_display(&display).add_search_path(data_dir().join("icons"));
+        // Ahead of the system's, so an installed Aerie's icons don't mask the ones in development.
+        let theme = gtk::IconTheme::for_display(&display);
+        let mut paths = vec![data_dir().join("icons")];
+        paths.extend(theme.search_path());
+        let paths: Vec<&std::path::Path> = paths.iter().map(std::path::PathBuf::as_path).collect();
+        theme.set_search_path(&paths);
     }
 }
 

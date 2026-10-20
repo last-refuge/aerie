@@ -47,3 +47,10 @@
 .drive-icon.hue-5 { --aerie-hue: #facc15; }
 .drive-icon.hue-6 { --aerie-hue: #34d399; }
 .drive-icon.hue-7 { --aerie-hue: #22d3ee; }
+
+.aerie-welcome {
+  background-image:
+    radial-gradient(ellipse 560px 380px at 50% 30%, alpha(#6366f1, 0.22), transparent),
+    radial-gradient(ellipse 900px 260px at 50% 110%, alpha(#8b5cf6, 0.20), transparent),
+    linear-gradient(to top, alpha(#0e7490, 0.10), transparent 40%);
+}
