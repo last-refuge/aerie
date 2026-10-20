@@ -60,6 +60,7 @@ async fn main() -> Result<(), Error> {
             .then_with(|| aerie_core::compare_names(&a.name, &b.name))
     });
     println!("My Drive: {} items", files.len());
+    println!("Shared drives: {}", drive.shared_drives().await?.len());
     if !watch {
         for file in &files {
             let size = file.size.map_or_else(|| "—".to_owned(), format_size);

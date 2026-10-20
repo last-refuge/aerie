@@ -198,7 +198,9 @@ async fn run(
     store.begin_inventory(account, &DriveFileId::new("root"), &cursor)?;
     let mut page = None;
     loop {
-        let (entries, next) = drive.inventory_page(page.as_deref()).await?;
+        let (entries, next) = drive
+            .inventory_page(&aerie_drive::api::Corpus::User, page.as_deref())
+            .await?;
         store.save_inventory_page(account, &entries)?;
         match next {
             Some(token) => page = Some(token),

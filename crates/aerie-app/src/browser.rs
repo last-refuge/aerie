@@ -492,6 +492,12 @@ enum Status {
 /// Widgets over a [`BrowseState`]. Navigation and search rebuild the visible list.
 struct Browser {
     engine: Rc<Engine>,
+    /// The shared drive being browsed, or `None` for My Drive.
+    tree: RefCell<Option<FileEntry>>,
+    drives_header: gtk::Label,
+    drives_list: gtk::ListBox,
+    drives: RefCell<Vec<FileEntry>>,
+    places: gtk::ListBox,
     /// The content area: the file list, or the transfer list.
     pages: gtk::Stack,
     transfers_row: gtk::ListBoxRow,
@@ -555,7 +561,7 @@ impl Browser {
         view.sort_by_column(Some(&name), gtk::SortType::Ascending);
 
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("Search My Drive")
+            .placeholder_text("Search Drive")
             .hexpand(true)
             .build();
         search.update_property(&[gtk::accessible::Property::KeyShortcuts("Control+K")]);
@@ -581,6 +587,20 @@ impl Browser {
         }
         let browser = Rc::new(Self {
             engine,
+            tree: RefCell::default(),
+            drives_header: gtk::Label::builder()
+                .label("Shared drives")
+                .xalign(0.0)
+                .css_classes(["heading", "sidebar-heading"])
+                .visible(false)
+                .build(),
+            drives_list: gtk::ListBox::builder()
+                .css_classes(["navigation-sidebar"])
+                .build(),
+            drives: RefCell::default(),
+            places: gtk::ListBox::builder()
+                .css_classes(["navigation-sidebar"])
+                .build(),
             pages: gtk::Stack::builder()
                 .transition_type(gtk::StackTransitionType::Crossfade)
                 .transition_duration(120)
@@ -789,13 +809,20 @@ impl Browser {
         ));
         let engine = self.engine.clone();
         let id = entry.id.clone();
-        crate::actions::move_to(&self.view, children, root, entry, move |to| {
-            engine.send(Command::Move {
-                id: id.clone(),
-                from: from.clone(),
-                to,
-            });
-        });
+        crate::actions::move_to(
+            &self.view,
+            children,
+            root,
+            self.root_label(),
+            entry,
+            move |to| {
+                engine.send(Command::Move {
+                    id: id.clone(),
+                    from: from.clone(),
+                    to,
+                });
+            },
+        );
     }
 
     fn transfers(&self) -> Vec<aerie_store::Transfer> {
@@ -815,11 +842,14 @@ impl Browser {
     ) {
         let state = self.state.borrow();
         match state.catalog() {
-            AppCatalog::Drive(catalog) => (
-                catalog.sync_settings(),
-                catalog.sync_roots(),
-                catalog.children(state.root()),
-            ),
+            AppCatalog::Drive(catalog) => {
+                let mut folders = catalog
+                    .root()
+                    .map(|root| catalog.children(&root))
+                    .unwrap_or_default();
+                folders.extend(catalog.shared_drives());
+                (catalog.sync_settings(), catalog.sync_roots(), folders)
+            }
             AppCatalog::Samples(_) => (None, Vec::new(), Vec::new()),
         }
     }
@@ -1025,10 +1055,7 @@ impl Browser {
     }
 
     fn sidebar(self: &Rc<Self>) -> gtk::Widget {
-        let places = gtk::ListBox::builder()
-            .css_classes(["navigation-sidebar"])
-            .vexpand(true)
-            .build();
+        let places = &self.places;
         places.append(&sidebar_row("aerie-folder-symbolic", "My Drive"));
         places.append(&self.transfers_row);
         places.append(&self.sync_row);
@@ -1039,13 +1066,14 @@ impl Browser {
             #[weak(rename_to = browser)]
             self,
             move |_, row| {
+                browser.drives_list.unselect_all();
                 if row.index() == 1 {
                     browser.pages.set_visible_child_name("transfers");
                 } else if row.index() == 2 {
                     browser.pages.set_visible_child_name("sync");
                 } else {
                     browser.pages.set_visible_child_name("files");
-                    browser.open_root();
+                    browser.open_tree(None);
                 }
             }
         ));
@@ -1061,8 +1089,29 @@ impl Browser {
         status.append(&self.status_icon);
         status.append(&text);
 
+        self.drives_list.connect_row_activated(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_, row| {
+                let drive = browser.drives.borrow().get(row.index() as usize).cloned();
+                if let Some(drive) = drive {
+                    browser.places.unselect_all();
+                    browser.pages.set_visible_child_name("files");
+                    browser.open_tree(Some(drive));
+                }
+            }
+        ));
+        let lists = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        lists.append(places);
+        lists.append(&self.drives_header);
+        lists.append(&self.drives_list);
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&lists)
+            .build();
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        body.append(&places);
+        body.append(&scroller);
         body.append(&status);
 
         let title = gtk::Box::builder().spacing(8).build();
@@ -1107,6 +1156,7 @@ impl Browser {
             .borrow_mut()
             .replace(root, AppCatalog::Drive(catalog));
         self.account.replace(Some(account.clone()));
+        self.tree.replace(None);
         self.transfers_row.set_visible(true);
         self.sync_row.set_visible(true);
         self.banner.set_revealed(false);
@@ -1121,6 +1171,7 @@ impl Browser {
     fn show_samples(self: &Rc<Self>) {
         self.state.replace(samples());
         self.account.replace(None);
+        self.tree.replace(None);
         self.transfers_row.set_visible(false);
         self.sync_row.set_visible(false);
         self.sync_state.replace(None);
@@ -1137,6 +1188,7 @@ impl Browser {
             if let AppCatalog::Drive(catalog) = state.catalog()
                 && let Some(root) = catalog.root()
                 && &root != state.root()
+                && self.tree.borrow().is_none()
             {
                 // The first inventory just reported the real root ID.
                 let AppCatalog::Drive(catalog) = std::mem::replace(
@@ -1152,7 +1204,62 @@ impl Browser {
             }
             state.revalidate();
         }
+        self.refresh_drives();
         self.refresh();
+    }
+
+    /// Lists the shared drives in the sidebar, keeping the open one if it still exists.
+    fn refresh_drives(self: &Rc<Self>) {
+        let drives = match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog.shared_drives(),
+            AppCatalog::Samples(_) => Vec::new(),
+        };
+        if *self.drives.borrow() == drives {
+            return;
+        }
+        while let Some(row) = self.drives_list.first_child() {
+            self.drives_list.remove(&row);
+        }
+        for drive in &drives {
+            self.drives_list
+                .append(&sidebar_row("aerie-hard-drive-symbolic", &drive.name));
+        }
+        self.drives_header.set_visible(!drives.is_empty());
+        let open = self.tree.borrow().as_ref().map(|tree| tree.id.clone());
+        if let Some(open) = open {
+            match drives.iter().position(|drive| drive.id == open) {
+                Some(index) => self
+                    .drives_list
+                    .select_row(self.drives_list.row_at_index(index as i32).as_ref()),
+                // The drive went away; return to My Drive.
+                None => self.open_tree(None),
+            }
+        }
+        *self.drives.borrow_mut() = drives;
+    }
+
+    /// Opens My Drive (`None`) or a shared drive at its top.
+    fn open_tree(self: &Rc<Self>, drive: Option<FileEntry>) {
+        let root = match &drive {
+            Some(drive) => drive.id.clone(),
+            None => match self.state.borrow().catalog() {
+                AppCatalog::Drive(catalog) => {
+                    catalog.root().unwrap_or_else(|| DriveFileId::new("root"))
+                }
+                AppCatalog::Samples(_) => DriveFileId::new(ROOT_ID),
+            },
+        };
+        self.tree.replace(drive);
+        self.state.borrow_mut().switch_root(root);
+        self.show_state();
+    }
+
+    /// The name at the top of the breadcrumbs.
+    fn root_label(&self) -> String {
+        self.tree
+            .borrow()
+            .as_ref()
+            .map_or_else(|| "My Drive".to_owned(), |drive| drive.name.clone())
     }
 
     fn set_status(&self, status: Status) {
@@ -1253,11 +1360,6 @@ impl Browser {
         }
     }
 
-    fn open_root(self: &Rc<Self>) {
-        self.state.borrow_mut().go_to_depth(0);
-        self.show_state();
-    }
-
     /// Refreshes after navigation, which ends any search.
     fn show_state(self: &Rc<Self>) {
         if self.search.text().is_empty() {
@@ -1323,7 +1425,8 @@ impl Browser {
 
         let state = self.state.borrow();
         let last = state.depth();
-        for (depth, name) in std::iter::once("My Drive")
+        let root_label = self.root_label();
+        for (depth, name) in std::iter::once(root_label.as_str())
             .chain(state.path_names())
             .enumerate()
         {

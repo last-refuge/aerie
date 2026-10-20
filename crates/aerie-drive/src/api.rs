@@ -86,6 +86,78 @@ pub fn intervening_revisions(
     }
 }
 
+/// Which set of items an inventory lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Corpus {
+    /// My Drive and items shared with the user.
+    User,
+    /// One shared drive, by ID.
+    SharedDrive(DriveFileId),
+}
+
+/// A shared drive the user belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedDrive {
+    pub id: DriveFileId,
+    pub name: String,
+    pub can_add_children: bool,
+}
+
+impl SharedDrive {
+    /// The drive as a folder at the top of its own tree, so browsing, sync roots and the
+    /// cache treat it like any other folder. Its own ID is the parent of its top items.
+    pub fn as_entry(&self) -> FileEntry {
+        FileEntry {
+            id: self.id.clone(),
+            parent: None,
+            name: self.name.clone(),
+            kind: FileKind::Folder,
+            size: None,
+            modified: 0,
+            mime_type: SHARED_DRIVE_MIME.to_owned(),
+            can: Capabilities {
+                add_children: self.can_add_children,
+                download: true,
+                ..Capabilities::default()
+            },
+            md5: None,
+            head_revision: None,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteDrive {
+    id: String,
+    name: String,
+    #[serde(default)]
+    capabilities: RemoteDriveCapabilities,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct RemoteDriveCapabilities {
+    can_add_children: bool,
+}
+
+impl RemoteDrive {
+    fn into_drive(self) -> SharedDrive {
+        SharedDrive {
+            id: DriveFileId::new(self.id),
+            name: self.name,
+            can_add_children: self.capabilities.can_add_children,
+        }
+    }
+}
+
+/// Marks the folder Aerie stores for a shared drive. Items shared with the user can also
+/// lack a parent, so the type, not the missing parent, identifies a drive.
+pub const SHARED_DRIVE_MIME: &str = "application/vnd.aerie.shared-drive";
+
+/// Drive's parameters for reaching items in shared drives as well as My Drive.
+const ALL_DRIVES: [(&str, &str); 1] = [("supportsAllDrives", "true")];
+
 /// One page of the change log.
 #[derive(Debug)]
 pub struct ChangePage {
@@ -189,6 +261,7 @@ impl DriveApi {
     /// Returns the entries and the token for the next page, if any.
     pub async fn inventory_page(
         &self,
+        corpus: &Corpus,
         page_token: Option<&str>,
     ) -> Result<(Vec<FileEntry>, Option<String>)> {
         #[derive(Deserialize)]
@@ -205,6 +278,14 @@ impl DriveApi {
             ("pageSize", "1000"),
             ("spaces", "drive"),
         ];
+        match corpus {
+            Corpus::User => params.push(("corpora", "user")),
+            Corpus::SharedDrive(id) => params.extend([
+                ("corpora", "drive"),
+                ("driveId", id.as_str()),
+                ("includeItemsFromAllDrives", "true"),
+            ]),
+        }
         if let Some(token) = page_token {
             params.push(("pageToken", token));
         }
@@ -247,6 +328,7 @@ impl DriveApi {
             .post(format!("{}/files", self.api_base))
             .bearer_auth(&self.access_token)
             .query(&[("fields", FILE)])
+            .query(&ALL_DRIVES)
             .json(&serde_json::json!({
                 "name": name,
                 "mimeType": FOLDER_MIME,
@@ -306,6 +388,7 @@ impl DriveApi {
             .patch(format!("{}/files/{}", self.api_base, id.as_str()))
             .bearer_auth(&self.access_token)
             .query(&[("fields", FILE)])
+            .query(&ALL_DRIVES)
             .query(params)
             .json(&metadata)
             .send()
@@ -324,6 +407,7 @@ impl DriveApi {
             .get(format!("{}/files/{}", self.api_base, id.as_str()))
             .bearer_auth(&self.access_token)
             .query(&[("alt", "media")])
+            .query(&ALL_DRIVES)
             .send()
             .await?;
         if !response.status().is_success() {
@@ -371,6 +455,7 @@ impl DriveApi {
             ))
             .bearer_auth(&self.access_token)
             .query(&[("alt", "media")])
+            .query(&ALL_DRIVES)
             .send()
             .await?;
         if !response.status().is_success() {
@@ -401,7 +486,38 @@ impl DriveApi {
         Ok(start.start_page_token)
     }
 
-    /// Reads one page of My Drive changes. Persist the page's changes and its cursor
+    /// The shared drives the user belongs to.
+    pub async fn shared_drives(&self) -> Result<Vec<SharedDrive>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Page {
+            next_page_token: Option<String>,
+            #[serde(default)]
+            drives: Vec<RemoteDrive>,
+        }
+        let mut drives = Vec::new();
+        let mut page_token = None::<String>;
+        loop {
+            let mut params = vec![
+                (
+                    "fields",
+                    "nextPageToken,drives(id,name,capabilities(canAddChildren))",
+                ),
+                ("pageSize", "100"),
+            ];
+            if let Some(token) = &page_token {
+                params.push(("pageToken", token));
+            }
+            let page: Page = self.get("drives", &params).await?;
+            drives.extend(page.drives.into_iter().map(RemoteDrive::into_drive));
+            match page.next_page_token {
+                Some(token) => page_token = Some(token),
+                None => return Ok(drives),
+            }
+        }
+    }
+
+    /// Reads one page of changes across My Drive and shared drives. Persist the page's changes and its cursor
     /// together, then continue from the cursor.
     pub async fn changes(&self, page_token: &str) -> Result<ChangePage> {
         #[derive(Deserialize)]
@@ -414,7 +530,8 @@ impl DriveApi {
         }
 
         let fields = format!(
-            "nextPageToken,newStartPageToken,changes(changeType,fileId,removed,file({FILE}))"
+            "nextPageToken,newStartPageToken,changes(changeType,fileId,driveId,removed,\
+             file({FILE}),drive(id,name,capabilities(canAddChildren)))"
         );
         let page: Page = self
             .get(
@@ -425,7 +542,7 @@ impl DriveApi {
                     ("pageSize", "1000"),
                     ("spaces", "drive"),
                     ("includeRemoved", "true"),
-                    ("restrictToMyDrive", "true"),
+                    ("includeItemsFromAllDrives", "true"),
                 ],
             )
             .await?;
@@ -459,6 +576,13 @@ impl DriveApi {
             .get(format!("{}/{path}", self.api_base))
             .bearer_auth(&self.access_token)
             .query(params)
+            .query(
+                if path.starts_with("files") || path.starts_with("changes") {
+                    &ALL_DRIVES[..]
+                } else {
+                    &[]
+                },
+            )
             .send()
             .await?;
         tracing::debug!(
@@ -528,14 +652,25 @@ struct RemoteCapabilities {
 struct RemoteChange {
     change_type: String,
     file_id: Option<String>,
+    drive_id: Option<String>,
     #[serde(default)]
     removed: bool,
     file: Option<RemoteFile>,
+    drive: Option<RemoteDrive>,
 }
 
 impl RemoteChange {
     /// Trashed items leave the browser, as Drive's own My Drive view does.
     fn into_change(self) -> Option<Change> {
+        if self.change_type == "drive" {
+            // A shared drive was renamed, joined, left or deleted.
+            return match self.drive {
+                Some(drive) if !self.removed => Some(Change::Upsert(drive.into_drive().as_entry())),
+                _ => self
+                    .drive_id
+                    .map(|id| Change::Removed(DriveFileId::new(id))),
+            };
+        }
         if self.change_type != "file" {
             return None;
         }
@@ -727,6 +862,23 @@ mod tests {
         assert!(!now.content_changed_since(&then));
         now.md5_checksum = Some("y".into());
         assert!(now.content_changed_since(&then));
+    }
+
+    #[test]
+    fn maps_shared_drive_changes_to_top_level_folders() {
+        let renamed = change(
+            r#"{"changeType":"drive","driveId":"d1","removed":false,
+            "drive":{"id":"d1","name":"Team","capabilities":{"canAddChildren":true}}}"#,
+        );
+        let Some(Change::Upsert(entry)) = renamed else {
+            panic!("expected an upsert")
+        };
+        assert_eq!(entry.name, "Team");
+        assert!(entry.is_folder() && entry.parent.is_none());
+        assert!(entry.can.add_children && !entry.can.trash && !entry.can.rename);
+
+        let left = change(r#"{"changeType":"drive","driveId":"d1","removed":true}"#);
+        assert_eq!(left, Some(Change::Removed(DriveFileId::new("d1"))));
     }
 
     #[test]

@@ -44,6 +44,13 @@ impl<C: Catalog> BrowseState<C> {
         *self = Self::new(root, catalog);
     }
 
+    /// Opens another tree, such as a shared drive, at its top.
+    pub fn switch_root(&mut self, root: DriveFileId) {
+        self.root = root;
+        self.path.clear();
+        self.query.clear();
+    }
+
     pub fn root(&self) -> &DriveFileId {
         &self.root
     }

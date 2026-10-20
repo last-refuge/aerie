@@ -22,6 +22,10 @@ impl StoreCatalog {
         self.store.root_id(&self.account).ok().flatten()
     }
 
+    pub fn shared_drives(&self) -> Vec<FileEntry> {
+        logged(self.store.shared_drives(&self.account))
+    }
+
     pub fn sync_settings(&self) -> Option<aerie_store::SyncSettings> {
         logged(self.store.sync_settings(&self.account))
     }
