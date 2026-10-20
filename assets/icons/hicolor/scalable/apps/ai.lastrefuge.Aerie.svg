@@ -5,22 +5,35 @@
       <stop offset="0" stop-color="#1e293b"/>
       <stop offset="1" stop-color="#0b1220"/>
     </linearGradient>
-    <linearGradient id="mark" x1="0" y1="1" x2="1" y2="0">
+    <radialGradient id="halo" cx="0.5" cy="0.45" r="0.5">
+      <stop offset="0" stop-color="#6366f1" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="outer" x1="0" y1="1" x2="1" y2="0">
       <stop offset="0" stop-color="#06b6d4"/>
       <stop offset="0.35" stop-color="#38bdf8"/>
       <stop offset="0.7" stop-color="#6366f1"/>
       <stop offset="1" stop-color="#8b5cf6"/>
     </linearGradient>
-    <linearGradient id="loop" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="inner" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#8b5cf6"/>
-      <stop offset="0.5" stop-color="#38bdf8"/>
-      <stop offset="1" stop-color="#06b6d4"/>
+      <stop offset="0.55" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
     </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
   </defs>
   <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#surface)"/>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#halo)"/>
   <rect x="8.5" y="8.5" width="111" height="111" rx="27.5" fill="none" stroke="#334155" stroke-opacity="0.6"/>
-  <path d="M36 88 H90 A19 19 0 0 0 92 50.1 A27 27 0 0 0 42 55 A16.5 16.5 0 0 0 36 88 Z"
-        fill="none" stroke="url(#mark)" stroke-width="9" stroke-linejoin="round"/>
-  <path d="M50 76 C52 63 68 58 79 66 C86 71 85 81 77 84"
-        fill="none" stroke="url(#loop)" stroke-width="7" stroke-linecap="round"/>
+  <g transform="translate(14 18) scale(0.78)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 80 H96 A21 21 0 0 0 98 38.1 A30 30 0 0 0 42 34 A23 23 0 0 0 24 80 Z"
+          stroke="url(#outer)" stroke-width="11" opacity="0.5" filter="url(#glow)"/>
+    <path d="M24 80 H96 A21 21 0 0 0 98 38.1 A30 30 0 0 0 42 34 A23 23 0 0 0 24 80 Z"
+          stroke="url(#outer)" stroke-width="10"/>
+    <path d="M34 79 C34 60 50 52 63 60 C74 67 88 64 93 52"
+          stroke="url(#inner)" stroke-width="9"/>
+    <path d="M47 40 C54 33 64 31 73 34" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3"/>
+  </g>
 </svg>

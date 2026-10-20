@@ -71,7 +71,7 @@ pub fn move_to(
         .css_classes(["heading"])
         .build();
     let up = gtk::Button::builder()
-        .icon_name("go-up-symbolic")
+        .icon_name("aerie-corner-left-up-symbolic")
         .tooltip_text("Up one folder")
         .css_classes(["flat"])
         .build();
@@ -130,8 +130,8 @@ pub fn move_to(
                     .title(glib::markup_escape_text(&folder.name).as_str())
                     .activatable(true)
                     .build();
-                row.add_prefix(&gtk::Image::from_icon_name("folder-symbolic"));
-                row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+                row.add_prefix(&gtk::Image::from_icon_name("aerie-folder-symbolic"));
+                row.add_suffix(&gtk::Image::from_icon_name("aerie-chevron-right-symbolic"));
                 row.connect_activated(glib::clone!(
                     #[strong]
                     path,

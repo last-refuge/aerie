@@ -17,7 +17,6 @@ A libadwaita window with a collapsible sidebar, a virtualized and sortable `Colu
 
 ## Open items
 
-- Inter and JetBrains Mono are requested by name but not bundled; the app falls back to the system font when they're missing. Bundling (both OFL) is a packaging decision.
-- Icons are GTK symbolic icons for now. Lucide (ISC) assets are still to be added.
+- Resolved October 20, 2026: Inter and JetBrains Mono ship with Aerie and are loaded for the app only through `pango_font_map_add_font_file` (Pango 1.56). Lucide icons ship as GTK symbolic icons in GTK's stroke-aware "grappa" format, which needs GTK 4.20; plain stroke SVGs render filled.
 - Keyboard, screen reader, fractional scaling and high-contrast checks on GNOME, KDE and Hyprland are still to do.
 - Headless screenshots work with `gtk4-broadwayd`, but its input handling is too unreliable for automated UI tests.

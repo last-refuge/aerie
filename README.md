@@ -8,7 +8,7 @@ The project is in early development. See the [implementation plan](llm-docs/impl
 
 ## Building
 
-Requires Rust 1.92+, GTK 4.16+ and libadwaita 1.6+. On Arch Linux:
+Requires Rust 1.92+, GTK 4.20+, libadwaita 1.6+ and Pango 1.56+. On Arch Linux:
 
 ```sh
 sudo pacman -S --needed gtk4 libadwaita rustup
@@ -41,4 +41,4 @@ Open **Sync** in the sidebar, choose an empty local folder (Aerie suggests `~/Ae
 
 ## License
 
-[MIT](LICENSE)
+Aerie's code is [MIT](LICENSE). Bundled assets keep their own licenses: Inter and JetBrains Mono under the SIL Open Font License (`assets/fonts`), and Lucide icons under ISC (`assets/icons/LICENSE-lucide.txt`; refresh them with `scripts/import-lucide.py`).

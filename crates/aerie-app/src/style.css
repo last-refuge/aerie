@@ -32,7 +32,7 @@
 }
 
 window {
-  font-family: "Inter", sans-serif;
+  font-family: "Inter Variable", "Inter", sans-serif;
 }
 
 .metadata {
@@ -55,6 +55,12 @@ button {
 }
 
 /* Brand surfaces */
+
+.brand-wordmark {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
 
 .brand-title {
   font-size: 16px;

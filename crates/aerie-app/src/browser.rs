@@ -432,12 +432,29 @@ impl Welcome {
         actions.append(&note);
         actions.append(&explore);
 
-        let status = adw::StatusPage::builder()
-            .icon_name(crate::APP_ID)
-            .title("Aerie")
-            .description("Your cloud, at home on Linux.")
-            .child(&actions)
+        let mark = gtk::Image::builder()
+            .icon_name(concat!("ai.lastrefuge.Aerie", "-mark"))
+            .pixel_size(144)
+            .accessible_role(gtk::AccessibleRole::Presentation)
             .build();
+        let wordmark = gtk::Label::builder()
+            .label("Aerie")
+            .css_classes(["brand-wordmark"])
+            .build();
+        let tagline = gtk::Label::builder()
+            .label("Your cloud, at home on Linux.")
+            .css_classes(["dim-label"])
+            .build();
+        let brand = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(8)
+            .margin_bottom(24)
+            .build();
+        brand.append(&mark);
+        brand.append(&wordmark);
+        brand.append(&tagline);
+        actions.prepend(&brand);
+        let status = adw::StatusPage::builder().child(&actions).build();
 
         let view = adw::ToolbarView::new();
         let header = adw::HeaderBar::builder().show_title(false).build();
@@ -567,7 +584,7 @@ impl Browser {
             .hexpand(true)
             .xalign(1.0)
             .build();
-        let transfers_row = sidebar_row("folder-download-symbolic", "Transfers");
+        let transfers_row = sidebar_row("aerie-arrow-down-up-symbolic", "Transfers");
         if let Some(row) = transfers_row.child().and_downcast::<gtk::Box>() {
             row.append(&transfers_badge);
         }
@@ -579,7 +596,7 @@ impl Browser {
                 .build(),
             transfers_row,
             transfers_badge,
-            sync_row: sidebar_row("emblem-synchronizing-symbolic", "Sync"),
+            sync_row: sidebar_row("aerie-refresh-cw-symbolic", "Sync"),
             sync_state: RefCell::default(),
             background: RefCell::default(),
             selection: selection.clone(),
@@ -987,7 +1004,7 @@ impl Browser {
             )
             .build();
         let new_folder = gtk::Button::builder()
-            .icon_name("folder-new-symbolic")
+            .icon_name("aerie-folder-plus-symbolic")
             .tooltip_text("New folder (Ctrl+Shift+N)")
             .action_name("win.new-folder")
             .build();
@@ -1001,7 +1018,7 @@ impl Browser {
         content.add_top_bar(&self.banner);
 
         let upload = gtk::Button::builder()
-            .icon_name("document-send-symbolic")
+            .icon_name("aerie-upload-symbolic")
             .tooltip_text("Upload files (Ctrl+U)")
             .action_name("win.upload")
             .build();
@@ -1034,7 +1051,7 @@ impl Browser {
             .css_classes(["navigation-sidebar"])
             .vexpand(true)
             .build();
-        places.append(&sidebar_row("folder-symbolic", "My Drive"));
+        places.append(&sidebar_row("aerie-folder-symbolic", "My Drive"));
         places.append(&self.transfers_row);
         places.append(&self.sync_row);
         self.transfers_row.set_visible(false);
@@ -1070,10 +1087,20 @@ impl Browser {
         body.append(&places);
         body.append(&status);
 
-        let title = gtk::Label::builder()
-            .label("Aerie")
-            .css_classes(["brand-title"])
-            .build();
+        let title = gtk::Box::builder().spacing(8).build();
+        title.append(
+            &gtk::Image::builder()
+                .icon_name(concat!("ai.lastrefuge.Aerie", "-mark"))
+                .pixel_size(24)
+                .accessible_role(gtk::AccessibleRole::Presentation)
+                .build(),
+        );
+        title.append(
+            &gtk::Label::builder()
+                .label("Aerie")
+                .css_classes(["brand-title"])
+                .build(),
+        );
         let view = adw::ToolbarView::new();
         let header = adw::HeaderBar::builder().title_widget(&title).build();
         header.pack_end(&crate::app_menu::button());
@@ -1159,31 +1186,31 @@ impl Browser {
             .unwrap_or_default();
         let (icon, title, detail) = match status {
             Status::Samples => (
-                "network-offline-symbolic",
+                "aerie-cloud-off-symbolic",
                 "Not connected".to_owned(),
                 "Sample files only".to_owned(),
             ),
             Status::Indexing(0) => (
-                "content-loading-symbolic",
+                "aerie-loader-circle-symbolic",
                 "Checking for changes".to_owned(),
                 email,
             ),
             Status::Indexing(files) => (
-                "content-loading-symbolic",
+                "aerie-loader-circle-symbolic",
                 "Indexing your Drive".to_owned(),
                 format!("{files} items so far"),
             ),
             Status::UpToDate => match self.sync_state.borrow().as_ref() {
                 Some(crate::engine::SyncState::InSync) => (
-                    "emblem-ok-symbolic",
+                    "aerie-cloud-check-symbolic",
                     "Everything in sync.".to_owned(),
                     email,
                 ),
                 Some(crate::engine::SyncState::Syncing) => {
-                    ("emblem-synchronizing-symbolic", "Syncing".to_owned(), email)
+                    ("aerie-refresh-cw-symbolic", "Syncing".to_owned(), email)
                 }
                 Some(crate::engine::SyncState::Paused) => (
-                    "media-playback-pause-symbolic",
+                    "aerie-pause-symbolic",
                     "Paused".to_owned(),
                     "Sync is paused".to_owned(),
                 ),
@@ -1191,19 +1218,19 @@ impl Browser {
                     crate::engine::SyncState::Attention(_)
                     | crate::engine::SyncState::HeldDeletions(_),
                 ) => (
-                    "dialog-warning-symbolic",
+                    "aerie-triangle-alert-symbolic",
                     "Needs attention".to_owned(),
                     "Open Sync for details".to_owned(),
                 ),
-                _ => ("emblem-ok-symbolic", "Up to date".to_owned(), email),
+                _ => ("aerie-cloud-check-symbolic", "Up to date".to_owned(), email),
             },
             Status::Offline => (
-                "network-offline-symbolic",
+                "aerie-cloud-off-symbolic",
                 "Offline".to_owned(),
                 "Showing files from the last update".to_owned(),
             ),
             Status::NeedsSignIn => (
-                "dialog-warning-symbolic",
+                "aerie-triangle-alert-symbolic",
                 "Needs attention".to_owned(),
                 "Sign in again to stay up to date".to_owned(),
             ),
@@ -1295,12 +1322,12 @@ impl Browser {
                 "Files appear here as Aerie finds them. This happens once.",
             ));
         } else if searching {
-            self.empty.set_icon_name(Some("system-search-symbolic"));
+            self.empty.set_icon_name(Some("aerie-search-symbolic"));
             self.empty.set_title("No results");
             self.empty
                 .set_description(Some("Try a different file name."));
         } else {
-            self.empty.set_icon_name(Some("folder-symbolic"));
+            self.empty.set_icon_name(Some("aerie-folder-symbolic"));
             self.empty.set_title("This folder is empty");
             self.empty.set_description(None);
         }
@@ -1325,7 +1352,7 @@ impl Browser {
             if depth > 0 {
                 self.breadcrumbs.append(
                     &gtk::Image::builder()
-                        .icon_name("go-next-symbolic")
+                        .icon_name("aerie-chevron-right-symbolic")
                         .css_classes(["dim-label"])
                         .accessible_role(gtk::AccessibleRole::Presentation)
                         .build(),
@@ -1548,12 +1575,12 @@ fn list_item(object: &glib::Object) -> &gtk::ListItem {
 
 fn icon_name(kind: FileKind) -> &'static str {
     match kind {
-        FileKind::Folder => "folder-symbolic",
-        FileKind::Document | FileKind::Pdf => "x-office-document-symbolic",
-        FileKind::Spreadsheet => "x-office-spreadsheet-symbolic",
-        FileKind::Presentation => "x-office-presentation-symbolic",
-        FileKind::Image => "image-x-generic-symbolic",
-        FileKind::Other => "text-x-generic-symbolic",
+        FileKind::Folder => "aerie-folder-symbolic",
+        FileKind::Document | FileKind::Pdf => "aerie-file-text-symbolic",
+        FileKind::Spreadsheet => "aerie-file-spreadsheet-symbolic",
+        FileKind::Presentation => "aerie-presentation-symbolic",
+        FileKind::Image => "aerie-file-image-symbolic",
+        FileKind::Other => "aerie-file-symbolic",
     }
 }
 

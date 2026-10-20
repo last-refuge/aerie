@@ -17,11 +17,19 @@ use gtk::{gdk, glib};
 
 pub(crate) const APP_ID: &str = "ai.lastrefuge.Aerie";
 
+/// Development builds register under their own ID, so running one never activates or
+/// disturbs an installed Aerie.
+const INSTANCE_ID: &str = if cfg!(debug_assertions) {
+    "ai.lastrefuge.Aerie.Devel"
+} else {
+    APP_ID
+};
+
 fn main() -> glib::ExitCode {
     let _logs = diagnostics::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "starting Aerie");
     glib::set_application_name("Aerie");
-    let app = adw::Application::builder().application_id(APP_ID).build();
+    let app = adw::Application::builder().application_id(INSTANCE_ID).build();
     app.add_main_option(
         "background",
         glib::Char::from(b'b'),
@@ -45,6 +53,7 @@ fn main() -> glib::ExitCode {
         preferences::apply_appearance(preferences::Settings::load().appearance);
         load_css();
         add_dev_icons();
+        load_fonts();
         app_menu::install(app);
         app.set_accels_for_action("win.search", &["<Control>k", "<Control>f"]);
         app.set_accels_for_action("win.new-folder", &["<Control><Shift>n"]);
@@ -59,11 +68,40 @@ fn main() -> glib::ExitCode {
 }
 
 /// Lets a build run from the source tree find its own icons before they're installed.
+/// Where Aerie's bundled assets live: the source tree in development builds, otherwise
+/// the install prefix (`AERIE_DATA_DIR` at build time, `/usr/share/aerie` by default).
+fn data_dir() -> std::path::PathBuf {
+    if cfg!(debug_assertions) {
+        std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"))
+    } else {
+        std::path::PathBuf::from(option_env!("AERIE_DATA_DIR").unwrap_or("/usr/share/aerie"))
+    }
+}
+
+/// Development builds find their icons in the source tree; installed ones use hicolor.
 fn add_dev_icons() {
     if cfg!(debug_assertions) {
         let display = gdk::Display::default().expect("a display is available");
-        gtk::IconTheme::for_display(&display)
-            .add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/icons"));
+        gtk::IconTheme::for_display(&display).add_search_path(data_dir().join("icons"));
+    }
+}
+
+/// Makes the bundled Inter and JetBrains Mono available to this app only, so the brand
+/// typefaces render without being installed system-wide.
+fn load_fonts() {
+    use pango::prelude::FontMapExt;
+    let font_map = gtk::Label::new(None).pango_context().font_map();
+    let Some(font_map) = font_map else { return };
+    let Ok(entries) = std::fs::read_dir(data_dir().join("fonts")) else {
+        tracing::warn!("bundled fonts not found; using system fonts");
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        if path.extension().is_some_and(|ext| ext == "ttf")
+            && let Err(err) = font_map.add_font_file(&path)
+        {
+            tracing::warn!(%err, "couldn't load a bundled font");
+        }
     }
 }
 

@@ -100,7 +100,7 @@ impl SyncPage {
         held_row.add_suffix(&delete);
         let local_row = adw::ActionRow::builder().title("Local folder").build();
         let open = gtk::Button::builder()
-            .icon_name("folder-open-symbolic")
+            .icon_name("aerie-folder-open-symbolic")
             .tooltip_text("Open in Files")
             .valign(gtk::Align::Center)
             .css_classes(["flat"])

@@ -15,6 +15,7 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "notify",
+ "pango",
  "serde",
  "serde_json",
  "tokio",
