@@ -215,6 +215,7 @@ async fn run(
         root,
         quarantine,
         cycle::Deletions::Hold,
+        |_| {},
     )
     .await?;
     println!(

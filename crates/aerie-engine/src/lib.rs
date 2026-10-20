@@ -134,6 +134,13 @@ pub enum Event {
     /// The transfer list changed; re-read it from the store.
     TransfersChanged,
     Sync(SyncState),
+    /// A sync pass is working in this synced folder (`None` when the step is at the top
+    /// level), `done` of `total` steps in.
+    SyncProgress {
+        root: Option<DriveFileId>,
+        done: usize,
+        total: usize,
+    },
     /// Both versions of a file were kept; this is the path of Drive's copy.
     ConflictKept(PathBuf),
     TransferProgress {

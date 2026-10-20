@@ -339,6 +339,16 @@ impl SyncPage {
         self.status_row.set_subtitle(&subtitle);
     }
 
+    /// Shows where a running pass is working.
+    pub fn set_progress(&self, folder: Option<&str>, done: usize, total: usize) {
+        self.status_row.set_title("Syncing");
+        let step = format!("{} of {total}", done + 1);
+        self.status_row.set_subtitle(&match folder {
+            Some(folder) => format!("{folder} · {step}"),
+            None => step,
+        });
+    }
+
     fn update_start(&self) {
         self.start
             .set_sensitive(self.chosen.borrow().is_some() && !self.selected.borrow().is_empty());

@@ -187,11 +187,14 @@ impl Worker {
         let drive = self.session.as_ref().expect("checked").drive.clone();
         let deletions = std::mem::replace(&mut self.deletions, Deletions::Hold);
         let done = self.completions.0.clone();
+        let events = self.events.clone();
         self.emit(Event::Sync(SyncState::Syncing));
         self.sync = Some(tokio::spawn(async move {
             let result = async {
                 let mut store = Store::open(&Store::default_path()).map_err(io)?;
                 let quarantine = quarantine_dir();
+                // Report each change of folder, not every step.
+                let mut last_root = None;
                 cycle::run(
                     &drive,
                     &mut store,
@@ -199,6 +202,16 @@ impl Worker {
                     &settings.local_root,
                     &quarantine,
                     deletions,
+                    |progress| {
+                        if progress.root != last_root || progress.done % 25 == 0 {
+                            last_root.clone_from(&progress.root);
+                            let _ = events.try_send(Event::SyncProgress {
+                                root: progress.root,
+                                done: progress.done,
+                                total: progress.total,
+                            });
+                        }
+                    },
                 )
                 .await
             }
