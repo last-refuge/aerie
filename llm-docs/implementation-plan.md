@@ -1,6 +1,6 @@
 # Aerie implementation plan
 
-**Status:** Proposed implementation roadmap; no application code exists yet.
+**Status:** Phase 0 complete ([closeout](decisions/0006-phase-0-closeout.md)); Phase 1 in progress.
 **Prepared:** October 19, 2026.
 **Design authority:** [Aerie brand guidelines](brand-guidelines.md).
 

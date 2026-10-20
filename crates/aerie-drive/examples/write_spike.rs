@@ -7,7 +7,7 @@ use std::io::Cursor;
 use std::time::Instant;
 
 use aerie_core::DriveFileId;
-use aerie_drive::api::DriveApi;
+use aerie_drive::api::{DriveApi, intervening_revisions};
 use aerie_drive::auth::{self, DRIVE_FILE};
 use aerie_drive::client::OAuthClient;
 use aerie_drive::upload::{CHUNK_UNIT, NewFile, RetryPolicy, UploadProgress, UploadSession};
@@ -51,7 +51,8 @@ async fn main() -> Result<(), Error> {
     println!("Working in My Drive › {FOLDER}\n");
 
     resumable_upload(&drive, &folder.id, &http, &access_token).await?;
-    overwrite_race(&drive, &folder.id, &http, &access_token).await?;
+    let race_file = overwrite_race(&drive, &folder.id, &http, &access_token).await?;
+    lost_update(&drive, &race_file).await?;
     println!("\nDone. The test files are in My Drive › {FOLDER}; delete them whenever you like.");
     Ok(())
 }
@@ -120,7 +121,7 @@ async fn overwrite_race(
     folder: &DriveFileId,
     http: &reqwest::Client,
     token: &str,
-) -> Result<(), Error> {
+) -> Result<DriveFileId, Error> {
     println!("\nOverwrite race");
     let file = upload_text(
         drive,
@@ -198,6 +199,63 @@ async fn overwrite_race(
             "conditional writes are ignored"
         }
     );
+    Ok(file)
+}
+
+/// Lets a remote edit slip in between Aerie's check and its write, then confirms the
+/// revision list reveals the overwritten edit and that its content is recoverable.
+async fn lost_update(drive: &DriveApi, file: &DriveFileId) -> Result<(), Error> {
+    println!("\nLost-update detection");
+    let baseline = drive.version(file).await?;
+    let unchanged = !drive.version(file).await?.content_changed_since(&baseline);
+    println!(
+        "  check before writing: {}",
+        if unchanged {
+            "no remote change"
+        } else {
+            "changed"
+        }
+    );
+
+    let sneaky = "version E from another device, written mid-race";
+    let session = drive
+        .start_replace(file, "text/plain", sneaky.len() as u64)
+        .await?;
+    upload_text(drive, session, sneaky).await?;
+
+    let ours = "version F from Aerie";
+    let session = drive
+        .start_replace(file, "text/plain", ours.len() as u64)
+        .await?;
+    upload_text(drive, session, ours).await?;
+    let our_head = drive
+        .version(file)
+        .await?
+        .head_revision_id
+        .ok_or("Drive returned no head revision")?;
+
+    let revisions = drive.revisions(file).await?;
+    let lost = intervening_revisions(&revisions, &baseline, &our_head);
+    println!(
+        "  after writing: {} revisions stored, {} written by someone else since the baseline",
+        revisions.len(),
+        lost.len()
+    );
+    let Some(last) = lost.last() else {
+        return Err("the overwritten edit wasn't detected".into());
+    };
+    let recovered = String::from_utf8(drive.download_revision(file, &last.id).await?)?;
+    println!(
+        "  recovered the overwritten edit: {}",
+        if recovered == sneaky {
+            "content matches"
+        } else {
+            "content DIFFERS"
+        }
+    );
+    if recovered != sneaky {
+        return Err("recovered revision doesn't match".into());
+    }
     Ok(())
 }
 
