@@ -1018,23 +1018,40 @@ impl Browser {
 
     /// Files dropped on the list upload into the open folder.
     fn install_drop_target(self: &Rc<Self>, target: &impl IsA<gtk::Widget>) {
+        use gtk::gdk::DragAction;
+        // File managers offer copy, move or link and leave the choice to the compositor;
+        // accept them all, ask for a copy, and never remove anything from the source.
         let drop = gtk::DropTarget::new(
-            gtk::gdk::FileList::static_type(),
-            gtk::gdk::DragAction::COPY,
+            glib::Type::INVALID,
+            DragAction::COPY | DragAction::MOVE | DragAction::LINK,
         );
+        drop.set_types(&[gtk::gdk::FileList::static_type(), gio::File::static_type()]);
+        drop.connect_enter(|target, _, _| {
+            if let Some(offer) = target.current_drop() {
+                tracing::info!(formats = %offer.formats(), actions = ?offer.actions(), "files dragged over the list");
+            }
+            DragAction::COPY
+        });
+        drop.connect_motion(|_, _, _| DragAction::COPY);
         drop.connect_drop(glib::clone!(
             #[weak(rename_to = browser)]
             self,
             #[upgrade_or]
             false,
             move |_, value, _, _| {
+                let files = if let Ok(list) = value.get::<gtk::gdk::FileList>() {
+                    list.files()
+                } else if let Ok(file) = value.get::<gio::File>() {
+                    vec![file]
+                } else {
+                    tracing::warn!(kind = %value.type_(), "a drop carried no files");
+                    return false;
+                };
+                tracing::info!(files = files.len(), "files dropped on the list");
                 let enabled = browser
                     .window()
                     .and_then(|window| window.lookup_action("upload"))
                     .is_some_and(|action| action.is_enabled());
-                let Ok(list) = value.get::<gtk::gdk::FileList>() else {
-                    return false;
-                };
                 if !enabled {
                     browser.toast(adw::Toast::new(if browser.state.borrow().is_searching() {
                         "Clear the search to upload into a folder."
@@ -1043,7 +1060,7 @@ impl Browser {
                     }));
                     return false;
                 }
-                browser.upload(list.files());
+                browser.upload(files);
                 true
             }
         ));
