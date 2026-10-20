@@ -15,6 +15,8 @@ pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashe
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
+    /// Stable for the life of the Google account, unlike the email address.
+    pub permission_id: String,
     pub display_name: String,
     pub email_address: String,
 }
@@ -137,7 +139,10 @@ impl DriveApi {
             user: Account,
         }
         let about: About = self
-            .get("about", &[("fields", "user(displayName,emailAddress)")])
+            .get(
+                "about",
+                &[("fields", "user(permissionId,displayName,emailAddress)")],
+            )
             .await?;
         Ok(about.user)
     }
@@ -176,6 +181,36 @@ impl DriveApi {
                 None => return Ok(entries),
             }
         }
+    }
+
+    /// One page of every untrashed item the account can see, for a full inventory.
+    /// Returns the entries and the token for the next page, if any.
+    pub async fn inventory_page(
+        &self,
+        page_token: Option<&str>,
+    ) -> Result<(Vec<FileEntry>, Option<String>)> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Page {
+            next_page_token: Option<String>,
+            #[serde(default)]
+            files: Vec<RemoteFile>,
+        }
+        let fields = format!("nextPageToken,files({FILE})");
+        let mut params = vec![
+            ("q", "trashed = false"),
+            ("fields", fields.as_str()),
+            ("pageSize", "1000"),
+            ("spaces", "drive"),
+        ];
+        if let Some(token) = page_token {
+            params.push(("pageToken", token));
+        }
+        let page: Page = self.get("files", &params).await?;
+        Ok((
+            page.files.into_iter().map(RemoteFile::into_entry).collect(),
+            page.next_page_token,
+        ))
     }
 
     /// Finds an untrashed folder by name directly inside `parent`.
