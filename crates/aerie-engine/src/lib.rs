@@ -224,6 +224,16 @@ struct Worker {
     offline: bool,
     /// Commands that arrived during a long inventory, handled once it finishes.
     pending: Vec<Command>,
+    /// Where an interrupted inventory stopped, so the next attempt picks up there
+    /// instead of listing everything again.
+    resume: Option<Resume>,
+}
+
+/// A point in an inventory: which corpus, the next page in it, and the files so far.
+struct Resume {
+    corpus: usize,
+    page: Option<String>,
+    files: u64,
 }
 
 impl Worker {
@@ -252,6 +262,7 @@ impl Worker {
             poll_delay: FASTEST_POLL,
             offline: false,
             pending: Vec::new(),
+            resume: None,
         }
     }
 
@@ -374,6 +385,7 @@ impl Worker {
                 if let Err(err) = self.store().set_indexing(&account, &indexing) {
                     return self.emit(Event::Problem(err.to_string()));
                 }
+                self.resume = None;
                 tracing::info!(
                     all = indexing.all,
                     drives = indexing.drives.len(),
@@ -562,6 +574,7 @@ impl Worker {
             task.abort();
         }
         self.watcher = None;
+        self.resume = None;
         if let Some((_, task)) = self.transfer.take() {
             task.abort();
         }
@@ -599,6 +612,11 @@ impl Worker {
                 tracing::info!("offline");
                 self.offline = true;
                 self.emit(Event::Offline);
+            }
+            Err(DriveError::RateLimited) => {
+                // Not a problem to show: wait as long as polling ever does, then resume.
+                tracing::warn!("Google asked Aerie to slow down; waiting");
+                self.poll_delay = SLOWEST_POLL;
             }
             Err(DriveError::SignInExpired) => {
                 tracing::info!("sign-in expired");
@@ -888,6 +906,9 @@ impl Worker {
             DriveError::SignInExpired => {
                 "Your sign-in expired. Sign in again to continue.".to_owned()
             }
+            DriveError::RateLimited => {
+                "Google Drive is busy with Aerie’s requests. Try again in a minute.".to_owned()
+            }
             DriveError::Api {
                 status: 403,
                 message,
@@ -983,25 +1004,76 @@ impl Worker {
         };
         let (all, indexed) = self.drives_to_index(account, &drives);
         let session = self.session.as_ref().expect("checked by caller");
-        let feed = if all { Feed::Everything } else { Feed::MyDrive };
-        let cursor = session.drive.start_page_token(&feed).await?;
         // `drive.file` can't read the root folder itself; the root is inferred below.
         let root = match session.drive.root_id().await {
             Ok(root) => Some(root),
             Err(DriveError::Api { status: 404, .. }) => None,
             Err(err) => return Err(err),
         };
+        let resume = match self.resume.take() {
+            Some(resume) => resume,
+            None => {
+                self.begin_inventory(account, all, &indexed, &drives, root.as_ref())
+                    .await?;
+                Resume {
+                    corpus: 0,
+                    page: None,
+                    files: 0,
+                }
+            }
+        };
+        tracing::info!(
+            corpus = resume.corpus,
+            files = resume.files,
+            "listing files"
+        );
+        let result = self.list_corpora(account, &indexed, resume).await;
+        match result {
+            Ok(true) => {}
+            // Sign-out or a new indexing choice ended the inventory early.
+            Ok(false) => return Ok(()),
+            Err(err) => return Err(err),
+        }
+        self.store
+            .as_mut()
+            .expect("store is open")
+            .finish_inventory(account)
+            .map_err(store_problem)?;
+        if root.is_none() {
+            let store = self.store.as_ref().expect("store is open");
+            if let Ok(Some(inferred)) = store.likely_root(account) {
+                store.set_root(account, &inferred).map_err(store_problem)?;
+            }
+        }
+        tracing::info!("inventory complete");
+        self.emit(Event::CatalogChanged);
+        Ok(())
+    }
+
+    /// Starts an inventory afresh: the change cursors to follow afterwards, and the
+    /// shared drives themselves.
+    async fn begin_inventory(
+        &mut self,
+        account: &str,
+        all: bool,
+        indexed: &[DriveFileId],
+        drives: &[SharedDrive],
+        root: Option<&DriveFileId>,
+    ) -> aerie_drive::Result<()> {
+        let session = self.session.as_ref().expect("checked by caller");
+        let feed = if all { Feed::Everything } else { Feed::MyDrive };
+        let cursor = session.drive.start_page_token(&feed).await?;
         let placeholder = DriveFileId::new("root");
         self.store
             .as_mut()
             .expect("store is open")
-            .begin_inventory(account, root.as_ref().unwrap_or(&placeholder), &cursor)
+            .begin_inventory(account, root.unwrap_or(&placeholder), &cursor)
             .map_err(store_problem)?;
 
         // Each indexed drive gets its own feed when not everything is indexed; seed those
         // cursors before listing too.
         if !all {
-            for drive in &indexed {
+            for drive in indexed {
                 let session = self.session.as_ref().expect("still signed in");
                 let cursor = session
                     .drive
@@ -1019,23 +1091,40 @@ impl Worker {
             .as_mut()
             .expect("store is open")
             .save_inventory_page(account, &drive_entries)
-            .map_err(store_problem)?;
+            .map_err(store_problem)
+    }
 
-        let mut files = 0u64;
-        let corpora = std::iter::once(Corpus::User).chain(
-            indexed
-                .iter()
-                .map(|drive| Corpus::SharedDrive(drive.clone())),
-        );
-        for corpus in corpora {
-            let mut page_token: Option<String> = None;
+    /// Lists every file from `from` on. Returns false when a command ended the listing
+    /// early; an error leaves [`Worker::resume`] set at the page that failed.
+    async fn list_corpora(
+        &mut self,
+        account: &str,
+        indexed: &[DriveFileId],
+        from: Resume,
+    ) -> aerie_drive::Result<bool> {
+        let Resume {
+            corpus: first,
+            page,
+            mut files,
+        } = from;
+        let mut page = Some(page);
+        let corpora = std::iter::once(Corpus::User)
+            .chain(
+                indexed
+                    .iter()
+                    .map(|drive| Corpus::SharedDrive(drive.clone())),
+            )
+            .enumerate()
+            .skip(first);
+        for (index, corpus) in corpora {
+            let mut page_token: Option<String> = page.take().flatten();
             loop {
                 // Stay responsive to sign-out during a long inventory.
                 if let Ok(command) = self.inbox.try_recv() {
                     match command {
                         Command::SignOut => {
                             self.sign_out().await;
-                            return Ok(());
+                            return Ok(false);
                         }
                         // A new indexing choice restarts the inventory to match it.
                         Command::SetIndexing(indexing) => {
@@ -1043,17 +1132,29 @@ impl Worker {
                                 .set_indexing(account, &indexing)
                                 .map_err(store_problem)?;
                             tracing::info!("indexing changed during inventory; restarting");
+                            self.resume = None;
                             self.poll_delay = FASTEST_POLL;
-                            return Ok(());
+                            return Ok(false);
                         }
                         command => self.pending.push(command),
                     }
                 }
                 let session = self.session.as_ref().expect("still signed in");
-                let (entries, next) = session
+                let (entries, next) = match session
                     .drive
                     .inventory_page(&corpus, page_token.as_deref())
-                    .await?;
+                    .await
+                {
+                    Ok(page) => page,
+                    Err(err) => {
+                        self.resume = Some(Resume {
+                            corpus: index,
+                            page: page_token,
+                            files,
+                        });
+                        return Err(err);
+                    }
+                };
                 files += entries.len() as u64;
                 self.store
                     .as_mut()
@@ -1068,20 +1169,8 @@ impl Worker {
                 }
             }
         }
-        self.store
-            .as_mut()
-            .expect("store is open")
-            .finish_inventory(account)
-            .map_err(store_problem)?;
-        if root.is_none() {
-            let store = self.store.as_ref().expect("store is open");
-            if let Ok(Some(inferred)) = store.likely_root(account) {
-                store.set_root(account, &inferred).map_err(store_problem)?;
-            }
-        }
-        tracing::info!(files, "inventory complete");
-        self.emit(Event::CatalogChanged);
-        Ok(())
+        tracing::info!(files, "listed every file");
+        Ok(true)
     }
 
     /// Applies every waiting page of changes. Returns whether anything changed.

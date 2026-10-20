@@ -189,6 +189,8 @@ pub enum ChangeCursor {
 #[derive(Clone)]
 pub struct DriveApi {
     pub(crate) http: reqwest::Client,
+    /// Shared by every clone, so the whole engine keeps one pace.
+    pub(crate) pacer: std::sync::Arc<crate::pace::Pacer>,
     pub(crate) access_token: String,
     pub(crate) api_base: String,
     pub(crate) upload_base: String,
@@ -208,6 +210,7 @@ impl DriveApi {
     ) -> Self {
         Self {
             http,
+            pacer: std::sync::Arc::default(),
             access_token,
             api_base: api_base.to_owned(),
             upload_base: upload_base.to_owned(),
@@ -403,17 +406,18 @@ impl DriveApi {
 
     pub async fn create_folder(&self, parent: &DriveFileId, name: &str) -> Result<FileEntry> {
         let response = self
-            .http
-            .post(format!("{}/files", self.api_base))
-            .bearer_auth(&self.access_token)
-            .query(&[("fields", FILE)])
-            .query(&ALL_DRIVES)
-            .json(&serde_json::json!({
-                "name": name,
-                "mimeType": FOLDER_MIME,
-                "parents": [parent.as_str()],
-            }))
-            .send()
+            .send(
+                self.http
+                    .post(format!("{}/files", self.api_base))
+                    .bearer_auth(&self.access_token)
+                    .query(&[("fields", FILE)])
+                    .query(&ALL_DRIVES)
+                    .json(&serde_json::json!({
+                        "name": name,
+                        "mimeType": FOLDER_MIME,
+                        "parents": [parent.as_str()],
+                    })),
+            )
             .await?;
         if !response.status().is_success() {
             return Err(api_error(response).await);
@@ -463,14 +467,15 @@ impl DriveApi {
         params: &[(&str, &str)],
     ) -> Result<FileEntry> {
         let response = self
-            .http
-            .patch(format!("{}/files/{}", self.api_base, id.as_str()))
-            .bearer_auth(&self.access_token)
-            .query(&[("fields", FILE)])
-            .query(&ALL_DRIVES)
-            .query(params)
-            .json(&metadata)
-            .send()
+            .send(
+                self.http
+                    .patch(format!("{}/files/{}", self.api_base, id.as_str()))
+                    .bearer_auth(&self.access_token)
+                    .query(&[("fields", FILE)])
+                    .query(&ALL_DRIVES)
+                    .query(params)
+                    .json(&metadata),
+            )
             .await?;
         tracing::debug!(status = response.status().as_u16(), "Drive update");
         if !response.status().is_success() {
@@ -482,12 +487,13 @@ impl DriveApi {
     /// Downloads an ordinary file's content. Google-native documents need an export instead.
     pub async fn download(&self, id: &DriveFileId) -> Result<Vec<u8>> {
         let response = self
-            .http
-            .get(format!("{}/files/{}", self.api_base, id.as_str()))
-            .bearer_auth(&self.access_token)
-            .query(&[("alt", "media")])
-            .query(&ALL_DRIVES)
-            .send()
+            .send(
+                self.http
+                    .get(format!("{}/files/{}", self.api_base, id.as_str()))
+                    .bearer_auth(&self.access_token)
+                    .query(&[("alt", "media")])
+                    .query(&ALL_DRIVES),
+            )
             .await?;
         if !response.status().is_success() {
             return Err(api_error(response).await);
@@ -526,16 +532,17 @@ impl DriveApi {
     /// Downloads the content of one stored revision.
     pub async fn download_revision(&self, id: &DriveFileId, revision: &str) -> Result<Vec<u8>> {
         let response = self
-            .http
-            .get(format!(
-                "{}/files/{}/revisions/{revision}",
-                self.api_base,
-                id.as_str()
-            ))
-            .bearer_auth(&self.access_token)
-            .query(&[("alt", "media")])
-            .query(&ALL_DRIVES)
-            .send()
+            .send(
+                self.http
+                    .get(format!(
+                        "{}/files/{}/revisions/{revision}",
+                        self.api_base,
+                        id.as_str()
+                    ))
+                    .bearer_auth(&self.access_token)
+                    .query(&[("alt", "media")])
+                    .query(&ALL_DRIVES),
+            )
             .await?;
         if !response.status().is_success() {
             return Err(api_error(response).await);
@@ -660,18 +667,19 @@ impl DriveApi {
         params: &[(&str, &str)],
     ) -> Result<T> {
         let response = self
-            .http
-            .get(format!("{}/{path}", self.api_base))
-            .bearer_auth(&self.access_token)
-            .query(params)
-            .query(
-                if path.starts_with("files") || path.starts_with("changes") {
-                    &ALL_DRIVES[..]
-                } else {
-                    &[]
-                },
+            .send(
+                self.http
+                    .get(format!("{}/{path}", self.api_base))
+                    .bearer_auth(&self.access_token)
+                    .query(params)
+                    .query(
+                        if path.starts_with("files") || path.starts_with("changes") {
+                            &ALL_DRIVES[..]
+                        } else {
+                            &[]
+                        },
+                    ),
             )
-            .send()
             .await?;
         tracing::debug!(
             endpoint = path_kind(path),
@@ -693,12 +701,17 @@ fn path_kind(path: &str) -> &str {
 /// Turns an unsuccessful response into an error, using Drive's message when present.
 pub(crate) async fn api_error(response: reqwest::Response) -> Error {
     let status = response.status();
-    let message = response
+    let body = response
         .json::<serde_json::Value>()
         .await
-        .ok()
-        .and_then(|body| body["error"]["message"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| status.to_string());
+        .unwrap_or_default();
+    let reason = body["error"]["errors"][0]["reason"].as_str().unwrap_or("");
+    if status.as_u16() == 429 || crate::pace::is_rate_limit_reason(reason) {
+        return Error::RateLimited;
+    }
+    let message = body["error"]["message"]
+        .as_str()
+        .map_or_else(|| status.to_string(), str::to_owned);
     Error::Api {
         status: status.as_u16(),
         message,
