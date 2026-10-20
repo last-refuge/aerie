@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Aerie</title>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e293b"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#06b6d4"/>
+      <stop offset="0.35" stop-color="#38bdf8"/>
+      <stop offset="0.7" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="loop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="0.5" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#surface)"/>
+  <rect x="8.5" y="8.5" width="111" height="111" rx="27.5" fill="none" stroke="#334155" stroke-opacity="0.6"/>
+  <path d="M36 88 H90 A19 19 0 0 0 92 50.1 A27 27 0 0 0 42 55 A16.5 16.5 0 0 0 36 88 Z"
+        fill="none" stroke="url(#mark)" stroke-width="9" stroke-linejoin="round"/>
+  <path d="M50 76 C52 63 68 58 79 66 C86 71 85 81 77 84"
+        fill="none" stroke="url(#loop)" stroke-width="7" stroke-linecap="round"/>
+</svg>

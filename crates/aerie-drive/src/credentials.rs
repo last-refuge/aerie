@@ -10,7 +10,7 @@ const LABEL: &str = "Aerie Google Drive sign-in";
 /// One stored sign-in per OAuth scope, so a narrow test grant never replaces the main one.
 fn attributes(scope: &str) -> HashMap<&'static str, &str> {
     HashMap::from([
-        ("application", "io.github.last_refuge.Aerie"),
+        ("application", "ai.lastrefuge.Aerie"),
         ("kind", "google-refresh-token"),
         ("scope", scope),
     ])

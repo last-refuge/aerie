@@ -1,5 +1,6 @@
 //! Aerie desktop application.
 
+mod app_menu;
 mod browser;
 mod diagnostics;
 mod fixtures;
@@ -7,7 +8,7 @@ mod fixtures;
 use adw::prelude::*;
 use gtk::{gdk, glib};
 
-const APP_ID: &str = "io.github.last_refuge.Aerie";
+pub(crate) const APP_ID: &str = "ai.lastrefuge.Aerie";
 
 fn main() -> glib::ExitCode {
     let _logs = diagnostics::init();
@@ -18,11 +19,22 @@ fn main() -> glib::ExitCode {
         // The brand is dark-first; an explicit system preference still wins.
         adw::StyleManager::default().set_color_scheme(adw::ColorScheme::PreferDark);
         load_css();
+        add_dev_icons();
+        app_menu::install(app);
         app.set_accels_for_action("win.search", &["<Control>k", "<Control>f"]);
         app.set_accels_for_action("win.new-folder", &["<Control><Shift>n"]);
     });
     app.connect_activate(browser::build_window);
     app.run()
+}
+
+/// Lets a build run from the source tree find its own icons before they're installed.
+fn add_dev_icons() {
+    if cfg!(debug_assertions) {
+        let display = gdk::Display::default().expect("a display is available");
+        gtk::IconTheme::for_display(&display)
+            .add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/icons"));
+    }
 }
 
 /// Loads the base styles, then layers the dark and high-contrast tokens to follow the

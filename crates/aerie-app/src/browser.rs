@@ -304,7 +304,9 @@ impl Browser {
             .css_classes(["brand-title"])
             .build();
         let view = adw::ToolbarView::new();
-        view.add_top_bar(&adw::HeaderBar::builder().title_widget(&title).build());
+        let header = adw::HeaderBar::builder().title_widget(&title).build();
+        header.pack_end(&crate::app_menu::button());
+        view.add_top_bar(&header);
         view.set_content(Some(&body));
         view.upcast()
     }
