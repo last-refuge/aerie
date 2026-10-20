@@ -68,7 +68,11 @@ impl DriveApi {
         let request = self
             .http
             .post(format!("{}/files", self.upload_base))
-            .query(&[("uploadType", "resumable"), ("fields", FILE)]);
+            .query(&[
+                ("uploadType", "resumable"),
+                ("fields", FILE),
+                ("supportsAllDrives", "true"),
+            ]);
         self.open_session(request, metadata, file.mime_type, total)
             .await
     }
@@ -83,7 +87,11 @@ impl DriveApi {
         let request = self
             .http
             .patch(format!("{}/files/{}", self.upload_base, id.as_str()))
-            .query(&[("uploadType", "resumable"), ("fields", FILE)]);
+            .query(&[
+                ("uploadType", "resumable"),
+                ("fields", FILE),
+                ("supportsAllDrives", "true"),
+            ]);
         self.open_session(request, serde_json::json!({}), mime_type, total)
             .await
     }

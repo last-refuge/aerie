@@ -60,7 +60,7 @@ impl SyncPage {
         intro.add(&folder_row);
         let setup_folders = adw::PreferencesGroup::builder()
             .title("Folders to sync")
-            .description("Choose folders from the top of My Drive.")
+            .description("Choose folders from the top of My Drive, or whole shared drives.")
             .build();
         let start = gtk::Button::builder()
             .label("Start Syncing")
@@ -281,6 +281,11 @@ impl SyncPage {
         for folder in folders {
             let row = adw::SwitchRow::builder()
                 .title(glib::markup_escape_text(&folder.name).as_str())
+                .subtitle(if folder.mime_type == aerie_drive::api::SHARED_DRIVE_MIME {
+                    "Shared drive"
+                } else {
+                    ""
+                })
                 .active(self.selected.borrow().contains(&folder.id))
                 .build();
             let id = folder.id.clone();

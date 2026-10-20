@@ -53,9 +53,9 @@ fn migrates_to_the_latest_schema_once() {
     let dir = std::env::temp_dir().join(format!("aerie-store-{}", std::process::id()));
     let path = dir.join("nested/aerie.sqlite3");
     let first = Store::open(&path).unwrap();
-    assert_eq!(first.schema_version().unwrap(), 4);
+    assert_eq!(first.schema_version().unwrap(), 5);
     drop(first);
-    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 4);
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 5);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -192,6 +192,33 @@ fn infers_the_root_from_orphaned_parents() {
     assert_eq!(
         store.likely_root(ACCOUNT).unwrap(),
         Some(DriveFileId::new("real-root"))
+    );
+}
+
+#[test]
+fn lists_shared_drives() {
+    let mut team = entry("d1", "x", "Team", FileKind::Folder, 1);
+    team.parent = None;
+    team.mime_type = "application/vnd.aerie.shared-drive".into();
+    // Items shared with the user can lack a parent too; they aren't drives.
+    let mut shared = entry("s1", "x", "Shared folder", FileKind::Folder, 1);
+    shared.parent = None;
+    let store = inventoried(&[
+        team,
+        shared,
+        entry("a", "root", "Mine", FileKind::Folder, 1),
+        entry("b", "d1", "Plan.pdf", FileKind::Pdf, 1),
+    ]);
+    let drives: Vec<_> = store
+        .shared_drives(ACCOUNT)
+        .unwrap()
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
+    assert_eq!(drives, ["Team"]);
+    assert_eq!(
+        names(store.children(ACCOUNT, &DriveFileId::new("d1")).unwrap()),
+        ["Plan.pdf"]
     );
 }
 

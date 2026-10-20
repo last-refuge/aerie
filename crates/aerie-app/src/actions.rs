@@ -58,6 +58,7 @@ pub fn move_to(
     parent: &impl IsA<gtk::Widget>,
     children: Children,
     root: DriveFileId,
+    root_label: String,
     item: FileEntry,
     done: impl Fn(DriveFileId) + 'static,
 ) {
@@ -105,9 +106,9 @@ pub fn move_to(
             }
             let names: Vec<_> = path.borrow().iter().map(|f| f.name.clone()).collect();
             location.set_label(&if names.is_empty() {
-                "My Drive".to_owned()
+                root_label.clone()
             } else {
-                format!("My Drive › {}", names.join(" › "))
+                format!("{root_label} › {}", names.join(" › "))
             });
             up.set_sensitive(!names.is_empty());
 

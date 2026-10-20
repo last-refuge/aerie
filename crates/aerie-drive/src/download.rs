@@ -27,7 +27,7 @@ impl DriveApi {
             .http
             .get(format!("{}/files/{}", self.api_base, id.as_str()))
             .bearer_auth(&self.access_token)
-            .query(&[("alt", "media")]);
+            .query(&[("alt", "media"), ("supportsAllDrives", "true")]);
         if offset > 0 {
             request = request.header(RANGE, format!("bytes={offset}-"));
         }
@@ -53,7 +53,7 @@ impl DriveApi {
             .http
             .get(format!("{}/files/{}/export", self.api_base, id.as_str()))
             .bearer_auth(&self.access_token)
-            .query(&[("mimeType", mime_type)])
+            .query(&[("mimeType", mime_type), ("supportsAllDrives", "true")])
             .send()
             .await?;
         if !response.status().is_success() {

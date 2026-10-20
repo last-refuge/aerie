@@ -277,6 +277,19 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Shared drives: the folders Aerie stores at the top of each drive's tree.
+    pub fn shared_drives(&self, account: &str) -> Result<Vec<FileEntry>> {
+        let mut statement = self.conn.prepare_cached(
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5,
+                    head_revision
+             FROM files
+             WHERE account_id = ?1 AND mime_type = 'application/vnd.aerie.shared-drive'
+             ORDER BY name COLLATE NOCASE",
+        )?;
+        let rows = statement.query_map([account], entry_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn file(&self, account: &str, id: &DriveFileId) -> Result<Option<FileEntry>> {
         Ok(self
             .conn

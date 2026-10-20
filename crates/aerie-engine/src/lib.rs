@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use aerie_core::{Change, DriveFileId, FileEntry, redact};
-use aerie_drive::api::{ChangeCursor, DriveApi};
+use aerie_drive::api::{ChangeCursor, Corpus, DriveApi, SharedDrive};
 use aerie_drive::auth::{self, DRIVE, DRIVE_FILE, DRIVE_READONLY};
 use aerie_drive::client::OAuthClient;
 use aerie_drive::{Error as DriveError, credentials, http_client};
@@ -877,30 +877,55 @@ impl Worker {
             .begin_inventory(account, root.as_ref().unwrap_or(&placeholder), &cursor)
             .map_err(store_problem)?;
 
+        // Shared drives appear as folders at the top of their own trees. Narrow scopes
+        // can't list them, which simply means none.
+        let session = self.session.as_ref().expect("still signed in");
+        let drives = match session.drive.shared_drives().await {
+            Ok(drives) => drives,
+            Err(DriveError::Api { status: 403, .. }) => Vec::new(),
+            Err(err) => return Err(err),
+        };
+        let drive_entries: Vec<_> = drives.iter().map(SharedDrive::as_entry).collect();
+        self.store
+            .as_mut()
+            .expect("store is open")
+            .save_inventory_page(account, &drive_entries)
+            .map_err(store_problem)?;
+
         let mut files = 0u64;
-        let mut page_token: Option<String> = None;
-        loop {
-            // Stay responsive to sign-out during a long inventory.
-            if let Ok(command) = self.inbox.try_recv() {
-                if matches!(command, Command::SignOut) {
-                    self.sign_out().await;
-                    return Ok(());
+        let corpora = std::iter::once(Corpus::User).chain(
+            drives
+                .iter()
+                .map(|drive| Corpus::SharedDrive(drive.id.clone())),
+        );
+        for corpus in corpora {
+            let mut page_token: Option<String> = None;
+            loop {
+                // Stay responsive to sign-out during a long inventory.
+                if let Ok(command) = self.inbox.try_recv() {
+                    if matches!(command, Command::SignOut) {
+                        self.sign_out().await;
+                        return Ok(());
+                    }
+                    self.pending.push(command);
                 }
-                self.pending.push(command);
-            }
-            let session = self.session.as_ref().expect("still signed in");
-            let (entries, next) = session.drive.inventory_page(page_token.as_deref()).await?;
-            files += entries.len() as u64;
-            self.store
-                .as_mut()
-                .expect("store is open")
-                .save_inventory_page(account, &entries)
-                .map_err(store_problem)?;
-            self.emit(Event::Indexing { files });
-            self.emit(Event::CatalogChanged);
-            match next {
-                Some(token) => page_token = Some(token),
-                None => break,
+                let session = self.session.as_ref().expect("still signed in");
+                let (entries, next) = session
+                    .drive
+                    .inventory_page(&corpus, page_token.as_deref())
+                    .await?;
+                files += entries.len() as u64;
+                self.store
+                    .as_mut()
+                    .expect("store is open")
+                    .save_inventory_page(account, &entries)
+                    .map_err(store_problem)?;
+                self.emit(Event::Indexing { files });
+                self.emit(Event::CatalogChanged);
+                match next {
+                    Some(token) => page_token = Some(token),
+                    None => break,
+                }
             }
         }
         self.store
