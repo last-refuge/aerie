@@ -8,6 +8,8 @@ url="https://github.com/last-refuge/aerie"
 license=('MIT')
 depends=('gtk4' 'libadwaita' 'gcc-libs' 'glibc')
 makedepends=('cargo')
+# makepkg's link-time optimization breaks C code built inside Rust crates (ring, SQLite).
+options=('!lto')
 optdepends=(
   'inter-font: the interface typeface'
   'ttf-jetbrains-mono: technical labels'
