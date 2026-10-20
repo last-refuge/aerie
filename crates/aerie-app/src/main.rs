@@ -7,6 +7,7 @@ mod catalog;
 mod diagnostics;
 mod engine;
 mod fixtures;
+mod sync_page;
 mod transfers;
 mod transfers_page;
 

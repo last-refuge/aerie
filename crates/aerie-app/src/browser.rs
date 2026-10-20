@@ -15,10 +15,12 @@ use gtk::{gio, glib};
 use crate::catalog::{AppCatalog, StoreCatalog};
 use crate::engine::{Command, Engine, Event, LocalFile};
 use crate::fixtures::{self, ROOT_ID};
+use crate::sync_page::SyncPage;
 use crate::transfers_page::TransfersPage;
 
 pub fn build_window(app: &adw::Application) {
-    if let Some(window) = app.active_window() {
+    // A window hidden while sync runs in the background comes back.
+    if let Some(window) = app.windows().first() {
         window.present();
         return;
     }
@@ -36,7 +38,8 @@ pub fn build_window(app: &adw::Application) {
     let browser = Browser::new(engine.clone());
     let welcome = Welcome::new(engine.clone());
     let transfers = TransfersPage::new(engine.clone());
-    let split = browser.split_view(&transfers.root);
+    let sync = SyncPage::new(engine.clone());
+    let split = browser.split_view(&transfers.root, &sync.root);
 
     let stack = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::Crossfade)
@@ -74,6 +77,8 @@ pub fn build_window(app: &adw::Application) {
         welcome,
         #[strong]
         transfers,
+        #[strong]
+        sync,
         async move {
             while let Ok(event) = inbox.recv().await {
                 if matches!(
@@ -84,11 +89,33 @@ pub fn build_window(app: &adw::Application) {
                     browser.set_transfer_count(TransfersPage::active_count(&list));
                     transfers.show(list);
                 }
+                if matches!(
+                    event,
+                    Event::Sync(_) | Event::SignedIn(_) | Event::SignedOut | Event::CatalogChanged
+                ) {
+                    let (settings, roots, folders) = browser.sync_view();
+                    browser.set_background(&window, settings.as_ref().is_some_and(|s| !s.paused));
+                    sync.show(settings, roots, folders);
+                }
                 match event {
                     Event::TransferProgress { id, done, total } => {
                         transfers.progress(id, done, total)
                     }
                     Event::TransfersChanged => {}
+                    Event::Sync(state) => {
+                        sync.set_state(&state);
+                        browser.set_sync_state(state);
+                    }
+                    Event::ConflictKept(path) => {
+                        let name = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned();
+                        let message = format!("Kept both versions. Drive’s copy is “{name}”.");
+                        toasts.add_toast(adw::Toast::new(&message));
+                        notify(&window, "conflict", "Kept both versions", &message);
+                    }
                     event => handle_event(event, &window, &stack, &toasts, &browser, &welcome),
                 }
             }
@@ -279,7 +306,10 @@ fn handle_event(
         Event::CatalogChanged => browser.reload(),
         Event::Offline => browser.set_status(Status::Offline),
         Event::Problem(message) => toasts.add_toast(adw::Toast::new(&message)),
-        Event::TransfersChanged | Event::TransferProgress { .. } => {}
+        Event::TransfersChanged
+        | Event::TransferProgress { .. }
+        | Event::Sync(_)
+        | Event::ConflictKept(_) => {}
         Event::NeedsWriteAccess => {
             let _ = WidgetExt::activate_action(window, "win.allow-changes", None);
         }
@@ -294,6 +324,15 @@ fn handle_event(
             }
             toasts.add_toast(toast);
         }
+    }
+}
+
+/// A desktop notification, for things worth knowing while the window is hidden.
+fn notify(window: &adw::ApplicationWindow, id: &str, title: &str, body: &str) {
+    if let Some(app) = window.application() {
+        let notification = gio::Notification::new(title);
+        notification.set_body(Some(body));
+        app.send_notification(Some(id), &notification);
     }
 }
 
@@ -420,6 +459,10 @@ struct Browser {
     pages: gtk::Stack,
     transfers_row: gtk::ListBoxRow,
     transfers_badge: gtk::Label,
+    sync_row: gtk::ListBoxRow,
+    sync_state: RefCell<Option<crate::engine::SyncState>>,
+    /// Keeps the app running with the window closed while sync is on.
+    background: RefCell<Option<gio::ApplicationHoldGuard>>,
     selection: gtk::SingleSelection,
     state: RefCell<BrowseState<AppCatalog>>,
     account: RefCell<Option<Account>>,
@@ -509,6 +552,9 @@ impl Browser {
                 .build(),
             transfers_row,
             transfers_badge,
+            sync_row: sidebar_row("emblem-synchronizing-symbolic", "Sync"),
+            sync_state: RefCell::default(),
+            background: RefCell::default(),
             selection: selection.clone(),
             state: RefCell::new(samples()),
             account: RefCell::default(),
@@ -725,6 +771,43 @@ impl Browser {
         }
     }
 
+    /// Sync settings, chosen roots and top-level folders, for the sync page.
+    fn sync_view(
+        &self,
+    ) -> (
+        Option<aerie_store::SyncSettings>,
+        Vec<DriveFileId>,
+        Vec<FileEntry>,
+    ) {
+        let state = self.state.borrow();
+        match state.catalog() {
+            AppCatalog::Drive(catalog) => (
+                catalog.sync_settings(),
+                catalog.sync_roots(),
+                catalog.children(state.root()),
+            ),
+            AppCatalog::Samples(_) => (None, Vec::new(), Vec::new()),
+        }
+    }
+
+    fn set_sync_state(&self, state: crate::engine::SyncState) {
+        let off = state == crate::engine::SyncState::Off;
+        self.sync_state.replace((!off).then_some(state));
+        self.set_status(Status::UpToDate);
+    }
+
+    /// While sync runs, closing the window hides it and Aerie keeps working; Quit in the
+    /// main menu stops everything.
+    fn set_background(&self, window: &adw::ApplicationWindow, on: bool) {
+        window.set_hide_on_close(on);
+        let mut guard = self.background.borrow_mut();
+        match (on, guard.is_some()) {
+            (true, false) => *guard = window.application().map(|app| app.hold()),
+            (false, true) => *guard = None,
+            _ => {}
+        }
+    }
+
     fn set_transfer_count(&self, active: usize) {
         self.transfers_badge.set_label(&if active == 0 {
             String::new()
@@ -862,7 +945,11 @@ impl Browser {
         }
     }
 
-    fn split_view(self: &Rc<Self>, transfers: &gtk::Widget) -> adw::NavigationSplitView {
+    fn split_view(
+        self: &Rc<Self>,
+        transfers: &gtk::Widget,
+        sync: &gtk::Widget,
+    ) -> adw::NavigationSplitView {
         let content = adw::ToolbarView::new();
         let header = adw::HeaderBar::builder()
             .title_widget(
@@ -905,6 +992,7 @@ impl Browser {
 
         self.pages.add_named(&content, Some("files"));
         self.pages.add_named(transfers, Some("transfers"));
+        self.pages.add_named(sync, Some("sync"));
 
         adw::NavigationSplitView::builder()
             .sidebar(&adw::NavigationPage::new(&self.sidebar(), "Aerie"))
@@ -921,7 +1009,9 @@ impl Browser {
             .build();
         places.append(&sidebar_row("folder-symbolic", "My Drive"));
         places.append(&self.transfers_row);
+        places.append(&self.sync_row);
         self.transfers_row.set_visible(false);
+        self.sync_row.set_visible(false);
         places.select_row(places.row_at_index(0).as_ref());
         places.connect_row_activated(glib::clone!(
             #[weak(rename_to = browser)]
@@ -929,6 +1019,8 @@ impl Browser {
             move |_, row| {
                 if row.index() == 1 {
                     browser.pages.set_visible_child_name("transfers");
+                } else if row.index() == 2 {
+                    browser.pages.set_visible_child_name("sync");
                 } else {
                     browser.pages.set_visible_child_name("files");
                     browser.open_root();
@@ -984,6 +1076,7 @@ impl Browser {
             .replace(root, AppCatalog::Drive(catalog));
         self.account.replace(Some(account.clone()));
         self.transfers_row.set_visible(true);
+        self.sync_row.set_visible(true);
         self.banner.set_revealed(false);
         self.set_status(if self.indexing.get() {
             Status::Indexing(0)
@@ -997,6 +1090,8 @@ impl Browser {
         self.state.replace(samples());
         self.account.replace(None);
         self.transfers_row.set_visible(false);
+        self.sync_row.set_visible(false);
+        self.sync_state.replace(None);
         self.pages.set_visible_child_name("files");
         self.indexing.set(false);
         self.set_status(Status::Samples);
@@ -1051,7 +1146,30 @@ impl Browser {
                 "Indexing your Drive".to_owned(),
                 format!("{files} items so far"),
             ),
-            Status::UpToDate => ("emblem-ok-symbolic", "Up to date".to_owned(), email),
+            Status::UpToDate => match self.sync_state.borrow().as_ref() {
+                Some(crate::engine::SyncState::InSync) => (
+                    "emblem-ok-symbolic",
+                    "Everything in sync.".to_owned(),
+                    email,
+                ),
+                Some(crate::engine::SyncState::Syncing) => {
+                    ("emblem-synchronizing-symbolic", "Syncing".to_owned(), email)
+                }
+                Some(crate::engine::SyncState::Paused) => (
+                    "media-playback-pause-symbolic",
+                    "Paused".to_owned(),
+                    "Sync is paused".to_owned(),
+                ),
+                Some(
+                    crate::engine::SyncState::Attention(_)
+                    | crate::engine::SyncState::HeldDeletions(_),
+                ) => (
+                    "dialog-warning-symbolic",
+                    "Needs attention".to_owned(),
+                    "Open Sync for details".to_owned(),
+                ),
+                _ => ("emblem-ok-symbolic", "Up to date".to_owned(), email),
+            },
             Status::Offline => (
                 "network-offline-symbolic",
                 "Offline".to_owned(),

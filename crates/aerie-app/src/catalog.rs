@@ -22,6 +22,14 @@ impl StoreCatalog {
         self.store.root_id(&self.account).ok().flatten()
     }
 
+    pub fn sync_settings(&self) -> Option<aerie_store::SyncSettings> {
+        logged(self.store.sync_settings(&self.account))
+    }
+
+    pub fn sync_roots(&self) -> Vec<DriveFileId> {
+        logged(self.store.sync_roots(&self.account))
+    }
+
     pub fn transfers(&self) -> Vec<aerie_store::Transfer> {
         logged(self.store.transfers(&self.account))
     }
