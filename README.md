@@ -21,9 +21,13 @@ Aerie reads its Google OAuth client from `~/.config/aerie/oauth-client.json`. Un
 
 Aerie stores the sign-in in the system keyring and caches Drive metadata in `~/.local/state/aerie/`. Choose **Sign Out** in the main menu to remove both. Your files on Drive are untouched.
 
+## Syncing folders
+
+Open **Sync** in the sidebar, choose an empty local folder (Aerie suggests `~/Aerie`), and pick folders from the top of My Drive. Edits, renames and deletions then flow both ways. Deletions go to the trash on the other side. When both sides changed a file, Aerie keeps both. While sync is on, closing the window keeps Aerie running; choose **Quit** in the main menu to stop it.
+
 ## Spikes
 
-`cargo run -p aerie-drive --example drive_spike` exercises sign-in, listing and change tracking from the terminal (add `-- --watch` to follow changes). `cargo run -p aerie-drive --example write_spike` runs upload and overwrite tests in an "Aerie test" folder, with access only to files Aerie creates.
+`cargo run -p aerie-drive --example drive_spike` exercises sign-in, listing and change tracking from the terminal (add `-- --watch` to follow changes). `cargo run -p aerie-drive --example write_spike` runs upload and overwrite tests in an "Aerie test" folder, with access only to files Aerie creates. `cargo run -p aerie-sync --example sync_spike` runs live sync scenarios there.
 
 ## Layout
 

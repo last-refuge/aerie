@@ -206,7 +206,15 @@ async fn run(
         }
     }
     store.finish_inventory(account)?;
-    let report = cycle::run(drive, store, account, root, quarantine, false).await?;
+    let report = cycle::run(
+        drive,
+        store,
+        account,
+        root,
+        quarantine,
+        cycle::Deletions::Hold,
+    )
+    .await?;
     println!(
         "  pass: {} steps, {} applied, {} conflicts, {} failed",
         report.planned,

@@ -10,6 +10,18 @@ use aerie_store::Store;
 use crate::execute::{Done, Executor, decode_row};
 use crate::{plan, scan, tree};
 
+/// What to do when a pass would delete an unusually large number of items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Deletions {
+    /// Skip them and report the count, for the user to decide.
+    Hold,
+    /// The user confirmed: carry them out.
+    Allow,
+    /// The user declined: forget the deleted side's baseline, so the surviving copies
+    /// are restored to the other side on this pass and the next.
+    Restore,
+}
+
 #[derive(Debug, Default)]
 pub struct Report {
     /// Steps planned this pass, including any that failed or were held.
@@ -39,7 +51,7 @@ pub async fn run(
     account: &str,
     root: &Path,
     quarantine: &Path,
-    allow_large_deletions: bool,
+    deletions: Deletions,
 ) -> Result<Report> {
     let roots: Vec<FileEntry> = store
         .sync_roots(account)
@@ -60,11 +72,26 @@ pub async fn run(
 
     let mut ops = plan::reconcile(&baseline, &remote, &local);
     let mut report = Report::default();
-    if !allow_large_deletions
-        && let Some(count) = plan::deletions_needing_confirmation(&ops, baseline.len())
-    {
-        report.held_deletions = Some(count);
-        ops.retain(|op| !op.is_deletion());
+    if let Some(count) = plan::deletions_needing_confirmation(&ops, baseline.len()) {
+        match deletions {
+            Deletions::Allow => {}
+            Deletions::Hold => {
+                report.held_deletions = Some(count);
+                ops.retain(|op| !op.is_deletion());
+            }
+            Deletions::Restore => {
+                for op in ops.iter().filter(|op| op.is_deletion()) {
+                    if let crate::Op::TrashLocal { path, .. }
+                    | crate::Op::TrashRemote { path, .. } = op
+                    {
+                        store
+                            .forget_baseline_under(account, path)
+                            .map_err(store_error)?;
+                    }
+                }
+                ops.retain(|op| !op.is_deletion());
+            }
+        }
     }
     report.planned = ops.len();
 

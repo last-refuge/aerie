@@ -16,6 +16,9 @@ use tokio::task::JoinHandle;
 
 use crate::transfers;
 
+mod sync;
+pub use sync::SyncState;
+
 /// The scopes Aerie asks for: read-only until the user first changes something, then full
 /// Drive access. `AERIE_DEV_SCOPE=drive.file` confines a development build to files Aerie
 /// creates itself, so write features can be tried on a real account safely.
@@ -73,6 +76,23 @@ pub enum Command {
     ResumeTransfer(i64),
     CancelTransfer(i64),
     ClearFinishedTransfers,
+    /// Start syncing the chosen Drive folders into an empty local folder.
+    StartSync {
+        local_root: PathBuf,
+        roots: Vec<DriveFileId>,
+    },
+    SetSyncRoots(Vec<DriveFileId>),
+    PauseSync,
+    ResumeSync,
+    /// Turn sync off. Files on both sides stay where they are.
+    StopSync,
+    SyncNow,
+    /// Carry out deletions that were held for confirmation.
+    AllowHeldDeletions,
+    /// Restore items whose deletion was held, instead of deleting them.
+    KeepHeldItems,
+    /// The local sync folder changed.
+    LocalChanged,
 }
 
 /// A local file chosen for upload.
@@ -108,6 +128,9 @@ pub enum Event {
     NeedsWriteAccess,
     /// The transfer list changed; re-read it from the store.
     TransfersChanged,
+    Sync(SyncState),
+    /// Both versions of a file were kept; this is the path of Drive's copy.
+    ConflictKept(PathBuf),
     TransferProgress {
         id: i64,
         done: u64,
@@ -120,6 +143,14 @@ pub enum Event {
     },
 }
 
+/// What a background task reports when it finishes. Aborted tasks report nothing; the
+/// command that aborted them already updated the state.
+enum Completion {
+    SignIn(aerie_drive::Result<auth::Tokens>),
+    Transfer(i64, aerie_drive::Result<transfers::Outcome>),
+    Sync(aerie_drive::Result<aerie_sync::cycle::Report>),
+}
+
 pub struct Engine {
     commands: Sender<Command>,
 }
@@ -127,6 +158,7 @@ pub struct Engine {
 impl Engine {
     pub fn start(events: Sender<Event>) -> Self {
         let (commands, inbox) = async_channel::unbounded();
+        let own = commands.clone();
         std::thread::Builder::new()
             .name("aerie-engine".into())
             .spawn(move || {
@@ -135,7 +167,7 @@ impl Engine {
                     .enable_all()
                     .build()
                     .expect("the async runtime starts");
-                runtime.block_on(Worker::new(events, inbox).run());
+                runtime.block_on(Worker::new(events, inbox, own).run());
             })
             .expect("the engine thread starts");
         Self { commands }
@@ -158,11 +190,23 @@ struct Session {
 struct Worker {
     events: Sender<Event>,
     inbox: Receiver<Command>,
+    /// For the folder watcher, which runs on its own thread.
+    own: Sender<Command>,
     store: Option<Store>,
     session: Option<Session>,
-    sign_in: Option<JoinHandle<aerie_drive::Result<auth::Tokens>>>,
+    sign_in: Option<JoinHandle<()>>,
     sign_in_scope: &'static str,
-    transfer: Option<(i64, JoinHandle<aerie_drive::Result<transfers::Outcome>>)>,
+    transfer: Option<(i64, JoinHandle<()>)>,
+    sync: Option<JoinHandle<()>>,
+    /// Background tasks report here when they finish.
+    completions: (Sender<Completion>, Receiver<Completion>),
+    /// Set by the local folder watcher; a sync pass is due.
+    sync_due: bool,
+    /// How the next pass treats an unusually large set of deletions.
+    deletions: aerie_sync::cycle::Deletions,
+    /// When the local folder last changed; a pass waits for it to settle.
+    local_changed_at: Option<Instant>,
+    watcher: Option<notify::RecommendedWatcher>,
     poll_delay: Duration,
     offline: bool,
     /// Commands that arrived during a long inventory, handled once it finishes.
@@ -170,15 +214,22 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(events: Sender<Event>, inbox: Receiver<Command>) -> Self {
+    fn new(events: Sender<Event>, inbox: Receiver<Command>, own: Sender<Command>) -> Self {
         Self {
             events,
             inbox,
+            own,
             store: None,
             session: None,
             sign_in: None,
             sign_in_scope: DRIVE_READONLY,
             transfer: None,
+            sync: None,
+            completions: async_channel::unbounded(),
+            sync_due: true,
+            deletions: aerie_sync::cycle::Deletions::Hold,
+            local_changed_at: None,
+            watcher: None,
             poll_delay: FASTEST_POLL,
             offline: false,
             pending: Vec::new(),
@@ -211,37 +262,38 @@ impl Worker {
             } else {
                 self.poll_delay
             };
+            // Settle local changes before syncing them.
+            let delay = if self.local_changed_at.is_some() {
+                delay.min(sync::SETTLE)
+            } else {
+                delay
+            };
             let polling = self.session.is_some();
             let inbox = self.inbox.clone();
-            let mut sign_in = self.sign_in.take();
-            let waiting_for_browser = sign_in.is_some();
-            let mut transfer = self.transfer.take();
-            let transferring = transfer.is_some();
+            let completions = self.completions.1.clone();
             tokio::select! {
-                command = inbox.recv() => {
-                    self.sign_in = sign_in;
-                    self.transfer = transfer;
-                    match command {
-                        Ok(command) => self.handle(command).await,
-                        Err(_) => return,
+                command = inbox.recv() => match command {
+                    Ok(command) => self.handle(command).await,
+                    Err(_) => return,
+                },
+                Ok(done) = completions.recv() => match done {
+                    Completion::SignIn(result) => {
+                        self.sign_in = None;
+                        self.finish_sign_in(result).await;
                     }
-                }
-                result = async { sign_in.as_mut().expect("guarded").await }, if waiting_for_browser => {
-                    self.transfer = transfer;
-                    self.finish_sign_in(result).await;
-                }
-                result = async { (&mut transfer.as_mut().expect("guarded").1).await }, if transferring => {
-                    self.sign_in = sign_in;
-                    let id = transfer.expect("guarded").0;
-                    self.finish_transfer(id, result).await;
-                }
-                () = tokio::time::sleep(delay), if polling => {
-                    self.sign_in = sign_in;
-                    self.transfer = transfer;
-                    self.check().await;
-                }
+                    Completion::Transfer(id, result) => {
+                        self.transfer = None;
+                        self.finish_transfer(id, result).await;
+                    }
+                    Completion::Sync(result) => {
+                        self.sync = None;
+                        self.finish_sync(result).await;
+                    }
+                },
+                () = tokio::time::sleep(delay), if polling => self.check().await,
             }
             self.pump_transfers().await;
+            self.pump_sync().await;
         }
     }
 
@@ -275,6 +327,21 @@ impl Worker {
                     .set_transfer_state(id, TransferState::Queued, None);
                 self.emit(Event::TransfersChanged);
             }
+            Command::StartSync { local_root, roots } => self.start_sync(local_root, roots).await,
+            Command::SetSyncRoots(roots) => self.set_sync_roots(roots),
+            Command::PauseSync => self.set_sync_paused(true),
+            Command::ResumeSync => self.set_sync_paused(false),
+            Command::StopSync => self.stop_sync(),
+            Command::SyncNow => self.sync_due = true,
+            Command::AllowHeldDeletions => {
+                self.deletions = aerie_sync::cycle::Deletions::Allow;
+                self.sync_due = true;
+            }
+            Command::KeepHeldItems => {
+                self.deletions = aerie_sync::cycle::Deletions::Restore;
+                self.sync_due = true;
+            }
+            Command::LocalChanged => self.local_changed_at = Some(Instant::now()),
             Command::ClearFinishedTransfers => {
                 if let Some(account) = self.session.as_ref().map(|s| s.account.clone()) {
                     let _ = self.store().clear_finished_transfers(&account);
@@ -341,6 +408,7 @@ impl Worker {
         let _ = self.store().requeue_interrupted_transfers(&account.id);
         self.session = Some(session);
         self.emit(Event::SignedIn(account));
+        self.resume_sync_watch();
         self.check().await;
     }
 
@@ -378,27 +446,24 @@ impl Worker {
         let Ok(http) = http_client() else { return };
         let events = self.events.clone();
         self.emit(Event::SignInStarted);
+        let done = self.completions.0.clone();
         self.sign_in = Some(tokio::spawn(async move {
-            auth::sign_in(&client, &http, scope, |url| {
+            let result = auth::sign_in(&client, &http, scope, |url| {
                 let _ = events.try_send(Event::OpenUri(url.to_string()));
                 Ok(())
             })
-            .await
+            .await;
+            let _ = done.send(Completion::SignIn(result)).await;
         }));
     }
 
-    async fn finish_sign_in(
-        &mut self,
-        result: Result<aerie_drive::Result<auth::Tokens>, tokio::task::JoinError>,
-    ) {
+    async fn finish_sign_in(&mut self, result: aerie_drive::Result<auth::Tokens>) {
         let tokens = match result {
-            Ok(Ok(tokens)) => tokens,
-            Ok(Err(err)) => {
+            Ok(tokens) => tokens,
+            Err(err) => {
                 tracing::warn!(%err, "sign-in failed");
                 return self.emit(Event::SignInFailed(err.to_string()));
             }
-            // Cancelled; CancelSignIn already reported it.
-            Err(_) => return,
         };
         let Some(refresh_token) = tokens.refresh_token.clone() else {
             return self.emit(Event::SignInFailed(
@@ -446,10 +511,15 @@ impl Worker {
             expires_at: tokens.expires_at,
         });
         self.emit(Event::SignedIn(account));
+        self.resume_sync_watch();
         self.check().await;
     }
 
     async fn sign_out(&mut self) {
+        if let Some(task) = self.sync.take() {
+            task.abort();
+        }
+        self.watcher = None;
         if let Some((_, task)) = self.transfer.take() {
             task.abort();
         }
@@ -481,6 +551,7 @@ impl Worker {
                     (self.poll_delay * 2).min(SLOWEST_POLL)
                 };
                 self.emit(Event::UpToDate);
+                self.sync_due = true;
             }
             Err(err) if err.is_offline() => {
                 tracing::info!("offline");
@@ -657,25 +728,19 @@ impl Worker {
         self.emit(Event::TransfersChanged);
         let drive = self.session.as_ref().expect("checked").drive.clone();
         let id = transfer.id;
-        let task = tokio::spawn(transfers::run(
-            drive,
-            transfer,
-            self.events.clone(),
-            Store::default_path(),
-        ));
+        let events = self.events.clone();
+        let done = self.completions.0.clone();
+        let task = tokio::spawn(async move {
+            let result = transfers::run(drive, transfer, events, Store::default_path()).await;
+            let _ = done.send(Completion::Transfer(id, result)).await;
+        });
         self.transfer = Some((id, task));
     }
 
-    async fn finish_transfer(
-        &mut self,
-        id: i64,
-        result: Result<aerie_drive::Result<transfers::Outcome>, tokio::task::JoinError>,
-    ) {
+    async fn finish_transfer(&mut self, id: i64, result: aerie_drive::Result<transfers::Outcome>) {
         let account = self.session.as_ref().map(|s| s.account.clone());
         match result {
-            // Aborted by pause, cancel or sign-out, which already updated the state.
-            Err(_) => {}
-            Ok(Ok(transfers::Outcome::Uploaded(entry))) => {
+            Ok(transfers::Outcome::Uploaded(entry)) => {
                 let _ = self.store().set_transfer_file(id, &entry.id);
                 let _ = self
                     .store()
@@ -685,7 +750,7 @@ impl Worker {
                 }
                 self.emit(Event::CatalogChanged);
             }
-            Ok(Ok(transfers::Outcome::Downloaded(path))) => {
+            Ok(transfers::Outcome::Downloaded(path)) => {
                 let renamed = self
                     .store()
                     .transfer(id)
@@ -703,7 +768,7 @@ impl Worker {
                     )));
                 }
             }
-            Ok(Err(err)) => {
+            Err(err) => {
                 let offline = err.is_offline();
                 tracing::warn!(transfer = id, %err, "transfer failed");
                 // Offline transfers wait in the queue; anything else needs the user.
