@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.3.5" date="2026-10-20">
+      <description>
+        <p>Shared drives appear as soon as Aerie opens, with a loading indicator during the first index.</p>
+      </description>
+    </release>
     <release version="0.3.4" date="2026-10-20">
       <description>
         <p>The file list keeps your selection and scroll position while Aerie indexes.</p>

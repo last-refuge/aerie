@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.5 beta
+
+- **Shared drives at start:** the sidebar lists your shared drives as soon as Aerie opens, instead of waiting for something on Drive to change. While the first index is still finding them, the sidebar says "Loading shared drives…" with a spinner.
+
 ## 0.3.4 beta
 
 - **Steady file list:** the list updates only the rows that changed, so the selection, an open context menu and the scroll position stay put while Aerie indexes or syncs.

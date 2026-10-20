@@ -532,6 +532,8 @@ struct Browser {
     /// The shared drive being browsed, or `None` for My Drive.
     tree: RefCell<Option<FileEntry>>,
     drives_header: gtk::Label,
+    /// Shown under the heading until the first index has found the shared drives.
+    drives_loading: gtk::Box,
     drives_list: gtk::ListBox,
     drives: RefCell<Vec<FileEntry>>,
     places: gtk::ListBox,
@@ -635,6 +637,21 @@ impl Browser {
                 .css_classes(["heading", "sidebar-heading"])
                 .visible(false)
                 .build(),
+            drives_loading: {
+                let loading = gtk::Box::builder()
+                    .spacing(12)
+                    .margin_start(12)
+                    .margin_end(12)
+                    .margin_top(6)
+                    .margin_bottom(6)
+                    .css_classes(["dim-label"])
+                    .accessible_role(gtk::AccessibleRole::Status)
+                    .visible(false)
+                    .build();
+                loading.append(&adw::Spinner::new());
+                loading.append(&gtk::Label::new(Some("Loading shared drives…")));
+                loading
+            },
             drives_list: gtk::ListBox::builder()
                 .css_classes(["navigation-sidebar"])
                 .build(),
@@ -1201,6 +1218,7 @@ impl Browser {
         let lists = gtk::Box::new(gtk::Orientation::Vertical, 6);
         lists.append(places);
         lists.append(&self.drives_header);
+        lists.append(&self.drives_loading);
         lists.append(&self.drives_list);
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -1262,6 +1280,8 @@ impl Browser {
         } else {
             Status::UpToDate
         });
+        // The cached drives show at once; the engine reports changes only when there are some.
+        self.refresh_drives();
         self.show_state();
     }
 
@@ -1275,6 +1295,7 @@ impl Browser {
         self.pages.set_visible_child_name("files");
         self.indexing.set(false);
         self.set_status(Status::Samples);
+        self.refresh_drives();
         self.show_state();
     }
 
@@ -1307,10 +1328,15 @@ impl Browser {
 
     /// Lists the shared drives in the sidebar, keeping the open one if it still exists.
     fn refresh_drives(self: &Rc<Self>) {
-        let drives = match self.state.borrow().catalog() {
-            AppCatalog::Drive(catalog) => catalog.shared_drives(),
-            AppCatalog::Samples(_) => Vec::new(),
+        let (drives, signed_in) = match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => (catalog.shared_drives(), true),
+            AppCatalog::Samples(_) => (Vec::new(), false),
         };
+        // The first index lists shared drives before any files; until then, say so.
+        let loading = signed_in && drives.is_empty() && self.indexing.get();
+        self.drives_loading.set_visible(loading);
+        self.drives_header
+            .set_visible(loading || !drives.is_empty());
         if *self.drives.borrow() == drives {
             return;
         }
@@ -1321,7 +1347,6 @@ impl Browser {
             self.drives_list
                 .append(&sidebar_row("aerie-hard-drive-symbolic", &drive.name));
         }
-        self.drives_header.set_visible(!drives.is_empty());
         let open = self.tree.borrow().as_ref().map(|tree| tree.id.clone());
         if let Some(open) = open {
             match drives.iter().position(|drive| drive.id == open) {
