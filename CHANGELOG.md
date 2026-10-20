@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6 beta
+
+- **Drops from file managers:** the file list accepts files whether the file manager offers to copy, move or link them, and always uploads a copy. Drops are logged so any that still fail can be diagnosed.
+
 ## 0.3.5 beta
 
 - **Shared drives at start:** the sidebar lists your shared drives as soon as Aerie opens, instead of waiting for something on Drive to change. While the first index is still finding them, the sidebar says "Loading shared drives…" with a spinner.
