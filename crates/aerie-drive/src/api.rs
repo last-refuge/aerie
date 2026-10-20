@@ -8,7 +8,8 @@ use time::format_description::well_known::Rfc3339;
 use crate::{Error, Result};
 
 const API: &str = "https://www.googleapis.com/drive/v3";
-const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed";
+const UPLOAD_API: &str = "https://www.googleapis.com/upload/drive/v3";
+pub(crate) const FILE: &str = "id,name,mimeType,size,modifiedTime,parents,trashed";
 
 /// The signed-in Google account.
 #[derive(Debug, Deserialize)]
@@ -35,13 +36,30 @@ pub enum ChangeCursor {
 }
 
 pub struct DriveApi {
-    http: reqwest::Client,
-    access_token: String,
+    pub(crate) http: reqwest::Client,
+    pub(crate) access_token: String,
+    api_base: String,
+    pub(crate) upload_base: String,
 }
 
 impl DriveApi {
     pub fn new(http: reqwest::Client, access_token: String) -> Self {
-        Self { http, access_token }
+        Self::with_base_urls(http, access_token, API, UPLOAD_API)
+    }
+
+    /// Points the client at a simulated Drive service, for tests.
+    pub fn with_base_urls(
+        http: reqwest::Client,
+        access_token: String,
+        api_base: &str,
+        upload_base: &str,
+    ) -> Self {
+        Self {
+            http,
+            access_token,
+            api_base: api_base.to_owned(),
+            upload_base: upload_base.to_owned(),
+        }
     }
 
     /// Replaces the access token after a refresh.
@@ -173,31 +191,36 @@ impl DriveApi {
     ) -> Result<T> {
         let response = self
             .http
-            .get(format!("{API}/{path}"))
+            .get(format!("{}/{path}", self.api_base))
             .bearer_auth(&self.access_token)
             .query(params)
             .send()
             .await?;
-        let status = response.status();
-        if status.is_success() {
+        if response.status().is_success() {
             return Ok(response.json().await?);
         }
-        let message = response
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|body| body["error"]["message"].as_str().map(str::to_owned))
-            .unwrap_or_else(|| status.to_string());
-        Err(Error::Api {
-            status: status.as_u16(),
-            message,
-        })
+        Err(api_error(response).await)
+    }
+}
+
+/// Turns an unsuccessful response into an error, using Drive's message when present.
+pub(crate) async fn api_error(response: reqwest::Response) -> Error {
+    let status = response.status();
+    let message = response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|body| body["error"]["message"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| status.to_string());
+    Error::Api {
+        status: status.as_u16(),
+        message,
     }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RemoteFile {
+pub(crate) struct RemoteFile {
     id: String,
     name: String,
     mime_type: String,
@@ -235,7 +258,7 @@ impl RemoteChange {
 }
 
 impl RemoteFile {
-    fn into_entry(self) -> FileEntry {
+    pub(crate) fn into_entry(self) -> FileEntry {
         FileEntry {
             kind: kind_for_mime(&self.mime_type),
             size: self.size.and_then(|size| size.parse().ok()),

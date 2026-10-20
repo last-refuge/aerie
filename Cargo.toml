@@ -15,6 +15,7 @@ aerie-core = { path = "crates/aerie-core" }
 aerie-drive = { path = "crates/aerie-drive" }
 aerie-store = { path = "crates/aerie-store" }
 aerie-sync = { path = "crates/aerie-sync" }
+axum = "0.8"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_16"] }
 oauth2 = "5"
 oo7 = "0.6"
@@ -23,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["parsing"] }
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 url = "2"
 
 [workspace.lints.rust]
