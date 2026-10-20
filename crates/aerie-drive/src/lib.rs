@@ -34,6 +34,8 @@ pub enum Error {
         requested: String,
         granted: Vec<String>,
     },
+    #[error("Google no longer accepts this sign-in; sign in again")]
+    SignInExpired,
     #[error("network error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("Drive API returned {status}: {message}")]
@@ -49,6 +51,13 @@ pub enum Error {
 impl From<oo7::Error> for Error {
     fn from(err: oo7::Error) -> Self {
         Self::Keyring(Box::new(err))
+    }
+}
+
+impl Error {
+    /// The computer couldn't reach Google, as opposed to Google refusing the request.
+    pub fn is_offline(&self) -> bool {
+        matches!(self, Self::Http(err) if err.is_connect() || err.is_timeout() || err.is_request())
     }
 }
 

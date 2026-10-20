@@ -15,17 +15,15 @@ sudo pacman -S --needed gtk4 libadwaita rustup
 cargo run -p aerie-app
 ```
 
-## Drive sign-in spike
+## Signing in
 
-Create a Desktop app OAuth client in a Google Cloud test project, save its JSON to `~/.config/aerie/oauth-client.json`, then run:
+Aerie reads its Google OAuth client from `~/.config/aerie/oauth-client.json`. Until a public client ships with Aerie, create a Desktop app OAuth client in a Google Cloud project and save its JSON there. Then choose **Connect Google Drive**.
 
-```sh
-cargo run -p aerie-drive --example drive_spike
-```
+Aerie stores the sign-in in the system keyring and caches Drive metadata in `~/.local/state/aerie/`. Choose **Sign Out** in the main menu to remove both. Your files on Drive are untouched.
 
-It signs in with read-only Drive access, keeps the sign-in in the system keyring, and lists My Drive. Add `-- --watch` to keep following changes, or `-- --sign-out` to remove the stored sign-in.
+## Spikes
 
-To try writes safely, `cargo run -p aerie-drive --example write_spike` signs in with access only to files Aerie creates, and runs upload and overwrite tests in an "Aerie test" folder.
+`cargo run -p aerie-drive --example drive_spike` exercises sign-in, listing and change tracking from the terminal (add `-- --watch` to follow changes). `cargo run -p aerie-drive --example write_spike` runs upload and overwrite tests in an "Aerie test" folder, with access only to files Aerie creates.
 
 ## Layout
 
@@ -35,7 +33,7 @@ To try writes safely, `cargo run -p aerie-drive --example write_spike` signs in 
 | `aerie-core` | Shared domain models and commands |
 | `aerie-drive` | OAuth and Drive API adapter |
 | `aerie-sync` | Reconciliation and transfer scheduling |
-| `aerie-store` | SQLite schema and migrations |
+| `aerie-store` | SQLite metadata cache, schema and migrations |
 
 ## License
 

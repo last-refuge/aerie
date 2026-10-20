@@ -4,24 +4,48 @@ use std::cmp::Ordering;
 
 use crate::{Change, DriveFileId, FileEntry};
 
+/// Where the browser reads metadata from: sample data, or the local cache of a Drive.
+pub trait Catalog {
+    fn children(&self, folder: &DriveFileId) -> Vec<FileEntry>;
+    /// Case-insensitive filename matches across the whole Drive.
+    fn search(&self, query: &str) -> Vec<FileEntry>;
+    fn get(&self, id: &DriveFileId) -> Option<FileEntry>;
+}
+
 /// What the browser shows: the open folder path and an optional filename query.
-#[derive(Debug)]
-pub struct BrowseState {
+pub struct BrowseState<C> {
+    catalog: C,
     root: DriveFileId,
-    entries: Vec<FileEntry>,
     /// Folders opened below the root, outermost first.
     path: Vec<FileEntry>,
     query: String,
 }
 
-impl BrowseState {
-    pub fn new(root: DriveFileId, entries: Vec<FileEntry>) -> Self {
+impl<C: Catalog> BrowseState<C> {
+    pub fn new(root: DriveFileId, catalog: C) -> Self {
         Self {
+            catalog,
             root,
-            entries,
             path: Vec::new(),
             query: String::new(),
         }
+    }
+
+    pub fn catalog(&self) -> &C {
+        &self.catalog
+    }
+
+    pub fn catalog_mut(&mut self) -> &mut C {
+        &mut self.catalog
+    }
+
+    /// Switches to another catalog, such as a newly signed-in Drive, at its root.
+    pub fn replace(&mut self, root: DriveFileId, catalog: C) {
+        *self = Self::new(root, catalog);
+    }
+
+    pub fn root(&self) -> &DriveFileId {
+        &self.root
     }
 
     pub fn current_folder(&self) -> &DriveFileId {
@@ -43,10 +67,9 @@ impl BrowseState {
 
     /// Opens a folder in the current listing or search results. Returns false for files.
     pub fn open(&mut self, id: &DriveFileId) -> bool {
-        let Some(folder) = self.entries.iter().find(|e| &e.id == id && e.is_folder()) else {
+        let Some(folder) = self.catalog.get(id).filter(FileEntry::is_folder) else {
             return false;
         };
-        let folder = folder.clone();
         if self.is_searching() {
             // A result can live anywhere, so rebuild the path from its ancestors.
             self.path = self.ancestors(&folder);
@@ -67,59 +90,85 @@ impl BrowseState {
         self.query = query.trim().to_lowercase();
     }
 
-    pub fn add(&mut self, entry: FileEntry) {
-        self.entries.push(entry);
-    }
-
-    /// Applies a remote change to the cached entries and the open path.
-    pub fn apply(&mut self, change: Change) {
-        match change {
-            Change::Upsert(entry) => {
-                for folder in self.path.iter_mut().filter(|f| f.id == entry.id) {
-                    *folder = entry.clone();
-                }
-                match self.entries.iter_mut().find(|e| e.id == entry.id) {
-                    Some(existing) => *existing = entry,
-                    None => self.entries.push(entry),
-                }
-            }
-            Change::Removed(id) => {
-                self.entries.retain(|e| e.id != id);
-                // Leave a folder that no longer exists, returning to its parent.
-                if let Some(depth) = self.path.iter().position(|f| f.id == id) {
-                    self.path.truncate(depth);
-                }
+    /// Re-reads the open path after the catalog changed: renamed folders take their new
+    /// names, and a folder that no longer exists is left for its parent.
+    pub fn revalidate(&mut self) {
+        let mut valid = Vec::with_capacity(self.path.len());
+        for folder in &self.path {
+            match self.catalog.get(&folder.id).filter(FileEntry::is_folder) {
+                Some(current) => valid.push(current),
+                None => break,
             }
         }
+        self.path = valid;
     }
 
-    /// Search results across all cached entries, or the current folder's children.
-    pub fn visible(&self) -> Vec<&FileEntry> {
-        let folder = self.current_folder();
-        self.entries
-            .iter()
-            .filter(|entry| {
-                if self.is_searching() {
-                    entry.name.to_lowercase().contains(&self.query)
-                } else {
-                    entry.parent.as_ref() == Some(folder)
-                }
-            })
-            .collect()
+    /// Search results across the catalog, or the current folder's children.
+    pub fn visible(&self) -> Vec<FileEntry> {
+        if self.is_searching() {
+            self.catalog.search(&self.query)
+        } else {
+            self.catalog.children(self.current_folder())
+        }
     }
 
     fn ancestors(&self, entry: &FileEntry) -> Vec<FileEntry> {
         let mut chain = Vec::new();
-        let mut parent = entry.parent.as_ref();
-        while let Some(id) = parent.filter(|id| **id != self.root) {
-            let Some(folder) = self.entries.iter().find(|e| &e.id == id) else {
+        let mut parent = entry.parent.clone();
+        while let Some(id) = parent.filter(|id| *id != self.root) {
+            let Some(folder) = self.catalog.get(&id) else {
                 break;
             };
-            chain.push(folder.clone());
-            parent = folder.parent.as_ref();
+            parent = folder.parent.clone();
+            chain.push(folder);
         }
         chain.reverse();
         chain
+    }
+}
+
+/// An in-memory catalog, for sample data and tests.
+#[derive(Debug, Default)]
+pub struct MemoryCatalog {
+    entries: Vec<FileEntry>,
+}
+
+impl MemoryCatalog {
+    pub fn new(entries: Vec<FileEntry>) -> Self {
+        Self { entries }
+    }
+
+    pub fn apply(&mut self, change: Change) {
+        match change {
+            Change::Upsert(entry) => match self.entries.iter_mut().find(|e| e.id == entry.id) {
+                Some(existing) => *existing = entry,
+                None => self.entries.push(entry),
+            },
+            Change::Removed(id) => self.entries.retain(|e| e.id != id),
+        }
+    }
+}
+
+impl Catalog for MemoryCatalog {
+    fn children(&self, folder: &DriveFileId) -> Vec<FileEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.parent.as_ref() == Some(folder))
+            .cloned()
+            .collect()
+    }
+
+    fn search(&self, query: &str) -> Vec<FileEntry> {
+        let query = query.to_lowercase();
+        self.entries
+            .iter()
+            .filter(|e| e.name.to_lowercase().contains(&query))
+            .cloned()
+            .collect()
+    }
+
+    fn get(&self, id: &DriveFileId) -> Option<FileEntry> {
+        self.entries.iter().find(|e| &e.id == id).cloned()
     }
 }
 
@@ -146,20 +195,25 @@ mod tests {
         }
     }
 
-    fn state() -> BrowseState {
+    fn state() -> BrowseState<MemoryCatalog> {
         BrowseState::new(
             DriveFileId::new("root"),
-            vec![
+            MemoryCatalog::new(vec![
                 entry("work", "root", "Work", FileKind::Folder),
                 entry("plan", "root", "Plan.pdf", FileKind::Pdf),
                 entry("contracts", "work", "Contracts", FileKind::Folder),
                 entry("nda", "contracts", "NDA.pdf", FileKind::Pdf),
-            ],
+            ]),
         )
     }
 
-    fn names(state: &BrowseState) -> Vec<&str> {
-        state.visible().iter().map(|e| e.name.as_str()).collect()
+    fn names(state: &BrowseState<MemoryCatalog>) -> Vec<String> {
+        state.visible().into_iter().map(|e| e.name).collect()
+    }
+
+    fn apply(state: &mut BrowseState<MemoryCatalog>, change: Change) {
+        state.catalog_mut().apply(change);
+        state.revalidate();
     }
 
     #[test]
@@ -212,18 +266,14 @@ mod tests {
     #[test]
     fn applies_remote_changes() {
         let mut state = state();
-        state.apply(Change::Upsert(entry(
-            "plan",
-            "work",
-            "Plan v2.pdf",
-            FileKind::Pdf,
-        )));
-        state.apply(Change::Upsert(entry(
-            "new",
-            "root",
-            "New.pdf",
-            FileKind::Pdf,
-        )));
+        apply(
+            &mut state,
+            Change::Upsert(entry("plan", "work", "Plan v2.pdf", FileKind::Pdf)),
+        );
+        apply(
+            &mut state,
+            Change::Upsert(entry("new", "root", "New.pdf", FileKind::Pdf)),
+        );
         assert_eq!(names(&state), ["Work", "New.pdf"]);
 
         state.open(&DriveFileId::new("work"));
@@ -235,7 +285,7 @@ mod tests {
         let mut state = state();
         state.open(&DriveFileId::new("work"));
         state.open(&DriveFileId::new("contracts"));
-        state.apply(Change::Removed(DriveFileId::new("work")));
+        apply(&mut state, Change::Removed(DriveFileId::new("work")));
         assert_eq!(state.depth(), 0);
         assert_eq!(names(&state), ["Plan.pdf"]);
     }
@@ -244,12 +294,10 @@ mod tests {
     fn renames_an_open_folder() {
         let mut state = state();
         state.open(&DriveFileId::new("work"));
-        state.apply(Change::Upsert(entry(
-            "work",
-            "root",
-            "Projects",
-            FileKind::Folder,
-        )));
+        apply(
+            &mut state,
+            Change::Upsert(entry("work", "root", "Projects", FileKind::Folder)),
+        );
         assert_eq!(state.path_names().collect::<Vec<_>>(), ["Projects"]);
     }
 

@@ -6,7 +6,7 @@ pub mod redact;
 
 use std::fmt;
 
-pub use browse::{BrowseState, compare_names};
+pub use browse::{BrowseState, Catalog, MemoryCatalog, compare_names};
 pub use files::{Change, FileEntry, FileKind, format_size};
 
 /// Stable Google Drive file identifier. Records are keyed by this, never by display name.

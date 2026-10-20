@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use aerie_core::{BrowseState, Change, FileKind, format_size};
+use aerie_core::{Catalog, Change, FileKind, MemoryCatalog, format_size};
 use aerie_drive::api::{ChangeCursor, DriveApi};
 use aerie_drive::auth::{self, DRIVE_READONLY, Tokens};
 use aerie_drive::client::OAuthClient;
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    let mut state = BrowseState::new(root, files);
+    let mut catalog = MemoryCatalog::new(files);
     let mut delay = FASTEST_POLL;
     println!("Watching for changes. Press Ctrl+C to stop.");
     loop {
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Error> {
                     Change::Upsert(entry) => println!("  changed  {}", entry.name),
                     Change::Removed(_) => println!("  removed  1 item"),
                 }
-                state.apply(change);
+                catalog.apply(change);
             }
             match page.next {
                 ChangeCursor::MorePages(token) => page_token = token,
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Error> {
 
         // Poll quickly while things are changing, and back off when idle.
         if seen > 0 {
-            println!("My Drive: {} items", state.visible().len());
+            println!("My Drive: {} items", catalog.children(&root).len());
             delay = FASTEST_POLL;
         } else {
             delay = (delay * 2).min(SLOWEST_POLL);

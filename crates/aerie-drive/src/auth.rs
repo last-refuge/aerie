@@ -109,7 +109,18 @@ pub async fn refresh(
         .exchange_refresh_token(&RefreshToken::new(refresh_token.to_owned()))
         .request_async(http)
         .await
-        .map_err(|err| Error::Auth(err.to_string()))?;
+        .map_err(|err| match err {
+            // Revoked, expired (seven days in Testing mode) or the password changed.
+            oauth2::RequestTokenError::ServerResponse(response)
+                if *response.error() == oauth2::basic::BasicErrorResponseType::InvalidGrant =>
+            {
+                Error::SignInExpired
+            }
+            oauth2::RequestTokenError::Request(oauth2::HttpClientError::Reqwest(err)) => {
+                Error::Http(*err)
+            }
+            other => Error::Auth(other.to_string()),
+        })?;
     Ok(tokens_from(&response))
 }
 

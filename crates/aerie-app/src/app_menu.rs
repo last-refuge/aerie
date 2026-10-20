@@ -52,6 +52,10 @@ pub fn install(app: &adw::Application) {
 
 pub fn button() -> gtk::MenuButton {
     let menu = gio::Menu::new();
+    let account = gio::Menu::new();
+    account.append(Some("Check for Changes"), Some("win.refresh"));
+    account.append(Some("Sign Out"), Some("win.sign-out"));
+    menu.append_section(None, &account);
     menu.append(Some("Keyboard Shortcuts"), Some("app.shortcuts"));
     menu.append(Some("About Aerie"), Some("app.about"));
     menu.append(Some("Quit"), Some("app.quit"));

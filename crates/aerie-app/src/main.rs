@@ -2,7 +2,9 @@
 
 mod app_menu;
 mod browser;
+mod catalog;
 mod diagnostics;
+mod engine;
 mod fixtures;
 
 use adw::prelude::*;
