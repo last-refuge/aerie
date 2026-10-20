@@ -1,6 +1,6 @@
 # Aerie implementation plan
 
-**Status:** Phase 0 complete ([closeout](decisions/0006-phase-0-closeout.md)); Phase 1 in progress.
+**Status:** Beta: Phases 0–4 implemented, Phase 5 partly. See the [decision records](decisions/) for evidence and deviations.
 **Prepared:** October 19, 2026.
 **Design authority:** [Aerie brand guidelines](brand-guidelines.md).
 
