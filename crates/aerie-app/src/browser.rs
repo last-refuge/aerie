@@ -414,7 +414,7 @@ impl Welcome {
         let explore = gtk::Button::builder()
             .label("Explore sample files")
             .halign(gtk::Align::Center)
-            .css_classes(["flat"])
+            .css_classes(["aerie-secondary"])
             .build();
 
         let cancel = gtk::Button::builder()
@@ -457,24 +457,30 @@ impl Welcome {
 
         let mark = gtk::Image::builder()
             .icon_name(concat!("ai.lastrefuge.Aerie", "-mark"))
-            .pixel_size(144)
+            .pixel_size(168)
             .accessible_role(gtk::AccessibleRole::Presentation)
             .build();
         let wordmark = gtk::Label::builder()
             .label("Aerie")
             .css_classes(["brand-wordmark"])
             .build();
+        let descriptor = gtk::Label::builder()
+            .label("GOOGLE DRIVE FOR LINUX")
+            .css_classes(["brand-descriptor"])
+            .build();
         let tagline = gtk::Label::builder()
-            .label("Your cloud, at home on Linux.")
-            .css_classes(["dim-label"])
+            .label("Your files, everywhere.")
+            .css_classes(["brand-tagline"])
+            .margin_top(12)
             .build();
         let brand = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(8)
-            .margin_bottom(24)
+            .spacing(4)
+            .margin_bottom(28)
             .build();
         brand.append(&mark);
         brand.append(&wordmark);
+        brand.append(&descriptor);
         brand.append(&tagline);
         actions.prepend(&brand);
         let status = adw::StatusPage::builder().child(&actions).build();
