@@ -238,16 +238,25 @@ struct Worker {
     offline: bool,
     /// Commands that arrived during a long inventory, handled once it finishes.
     pending: Vec<Command>,
-    /// Where an interrupted inventory stopped, so the next attempt picks up there
-    /// instead of listing everything again.
-    resume: Option<Resume>,
 }
 
-/// A point in an inventory: which corpus, the next page in it, and the files so far.
+/// A point in an unfinished inventory, saved after every page so that a failure or a
+/// restart continues from there instead of listing everything again.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Resume {
-    corpus: usize,
+    /// The shared drive being listed, or `None` for My Drive and shared-with-me.
+    corpus: Option<DriveFileId>,
+    /// The next page in it; `None` starts the corpus from the top.
     page: Option<String>,
     files: u64,
+}
+
+impl Resume {
+    const START: Self = Self {
+        corpus: None,
+        page: None,
+        files: 0,
+    };
 }
 
 impl Worker {
@@ -276,7 +285,6 @@ impl Worker {
             poll_delay: FASTEST_POLL,
             offline: false,
             pending: Vec::new(),
-            resume: None,
         }
     }
 
@@ -399,7 +407,6 @@ impl Worker {
                 if let Err(err) = self.store().set_indexing(&account, &indexing) {
                     return self.emit(Event::Problem(err.to_string()));
                 }
-                self.resume = None;
                 tracing::info!(
                     all = indexing.all,
                     drives = indexing.drives.len(),
@@ -588,7 +595,6 @@ impl Worker {
             task.abort();
         }
         self.watcher = None;
-        self.resume = None;
         if let Some((_, task)) = self.transfer.take() {
             task.abort();
         }
@@ -1038,24 +1044,42 @@ impl Worker {
             Err(DriveError::Api { status: 404, .. }) => None,
             Err(err) => return Err(err),
         };
-        let resume = match self.resume.take() {
-            Some(resume) => resume,
+        // Continue an unfinished inventory when its place is still in the list.
+        let saved = self
+            .store()
+            .inventory_resume(account)
+            .ok()
+            .flatten()
+            .and_then(|saved| serde_json::from_str::<Resume>(&saved).ok())
+            .filter(|resume| {
+                resume
+                    .corpus
+                    .as_ref()
+                    .is_none_or(|drive| indexed.contains(drive))
+            });
+        let resume = match saved {
+            Some(resume) => {
+                tracing::info!(files = resume.files, "continuing an unfinished index");
+                resume
+            }
             None => {
                 self.begin_inventory(account, all, &indexed, &drives, root.as_ref())
                     .await?;
-                Resume {
-                    corpus: 0,
-                    page: None,
-                    files: 0,
-                }
+                tracing::info!("indexing every file");
+                Resume::START
             }
         };
-        tracing::info!(
-            corpus = resume.corpus,
-            files = resume.files,
-            "listing files"
-        );
-        let result = self.list_corpora(account, &indexed, resume).await;
+        let resumed = resume.page.is_some() || resume.corpus.is_some();
+        let result = match self.list_corpora(account, &indexed, resume).await {
+            // Google no longer accepts the saved page: start over rather than stall.
+            Err(DriveError::Api { status: 400, .. }) if resumed => {
+                tracing::info!("the saved index position expired; starting over");
+                self.begin_inventory(account, all, &indexed, &drives, root.as_ref())
+                    .await?;
+                self.list_corpora(account, &indexed, Resume::START).await
+            }
+            result => result,
+        };
         match result {
             Ok(true) => {}
             // Sign-out or a new indexing choice ended the inventory early.
@@ -1122,8 +1146,8 @@ impl Worker {
             .map_err(store_problem)
     }
 
-    /// Lists every file from `from` on. Returns false when a command ended the listing
-    /// early; an error leaves [`Worker::resume`] set at the page that failed.
+    /// Lists every file from `from` on, saving its place after each page. Returns false
+    /// when a command ended the listing early.
     async fn list_corpora(
         &mut self,
         account: &str,
@@ -1154,15 +1178,12 @@ impl Worker {
             mut files,
         } = from;
         let mut page = Some(page);
-        let corpora = std::iter::once(Corpus::User)
-            .chain(
-                indexed
-                    .iter()
-                    .map(|drive| Corpus::SharedDrive(drive.clone())),
-            )
-            .enumerate()
-            .skip(first);
-        for (index, corpus) in corpora {
+        let corpora: Vec<Option<DriveFileId>> = std::iter::once(None)
+            .chain(indexed.iter().cloned().map(Some))
+            .collect();
+        let start = corpora.iter().position(|c| *c == first).unwrap_or(0);
+        for (index, id) in corpora.iter().enumerate().skip(start) {
+            let corpus = id.clone().map_or(Corpus::User, Corpus::SharedDrive);
             let mut page_token: Option<String> = page.take().flatten();
             loop {
                 // Stay responsive during a long inventory: file actions and transfers
@@ -1185,7 +1206,6 @@ impl Worker {
                                 .set_indexing(account, &indexing)
                                 .map_err(store_problem)?;
                             tracing::info!("indexing changed during inventory; restarting");
-                            self.resume = None;
                             self.poll_delay = FASTEST_POLL;
                             return Ok(false);
                         }
@@ -1212,14 +1232,7 @@ impl Worker {
                     .await
                 {
                     Ok(page) => page,
-                    Err(err) => {
-                        self.resume = Some(Resume {
-                            corpus: index,
-                            page: page_token,
-                            files,
-                        });
-                        return Err(err);
-                    }
+                    Err(err) => return Err(err),
                 };
                 files += entries.len() as u64;
                 self.store
@@ -1227,6 +1240,25 @@ impl Worker {
                     .expect("store is open")
                     .save_inventory_page(account, &entries)
                     .map_err(store_problem)?;
+                // The next page, or the start of the next corpus.
+                let place = match &next {
+                    Some(token) => Resume {
+                        corpus: id.clone(),
+                        page: Some(token.clone()),
+                        files,
+                    },
+                    None => Resume {
+                        corpus: corpora.get(index + 1).cloned().flatten(),
+                        page: None,
+                        files,
+                    },
+                };
+                if next.is_some() || index + 1 < corpora.len() {
+                    let place = serde_json::to_string(&place).expect("serializable");
+                    if let Err(err) = self.store().set_inventory_resume(account, Some(&place)) {
+                        tracing::warn!(%err, "couldn't save the index position");
+                    }
+                }
                 self.emit(Event::Indexing { files });
                 self.emit(Event::CatalogChanged);
                 match next {

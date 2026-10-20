@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 beta
+
+- **Indexing survives restarts:** Aerie saves its place after every page of the first index, so quitting, upgrading, a restart or a rate limit continues from there instead of listing every file again. Once the index is complete, Aerie keeps it current from Google's change feed and never rebuilds it unless you change which shared drives to index.
+
 ## 0.3.2 beta
 
 - **Uploads while indexing:** uploads, downloads and file actions no longer wait for a long index to finish; they go ahead between pages of it.

@@ -54,9 +54,9 @@ fn migrates_to_the_latest_schema_once() {
     let dir = std::env::temp_dir().join(format!("aerie-store-{}", std::process::id()));
     let path = dir.join("nested/aerie.sqlite3");
     let first = Store::open(&path).unwrap();
-    assert_eq!(first.schema_version().unwrap(), 6);
+    assert_eq!(first.schema_version().unwrap(), 7);
     drop(first);
-    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 6);
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 7);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -320,4 +320,28 @@ fn keeps_indexing_choices_and_drive_cursors() {
             .unwrap(),
         None
     );
+}
+
+#[test]
+fn an_unfinished_inventory_remembers_where_it_stopped() {
+    let mut store = store();
+    store
+        .begin_inventory(ACCOUNT, &DriveFileId::new("root"), "cursor-1")
+        .unwrap();
+    assert_eq!(store.inventory_resume(ACCOUNT).unwrap(), None);
+    store.set_inventory_resume(ACCOUNT, Some("page-7")).unwrap();
+    assert_eq!(
+        store.inventory_resume(ACCOUNT).unwrap().as_deref(),
+        Some("page-7")
+    );
+
+    // Finishing, or starting over, forgets it.
+    store.finish_inventory(ACCOUNT).unwrap();
+    assert_eq!(store.inventory_resume(ACCOUNT).unwrap(), None);
+    store.set_inventory_resume(ACCOUNT, Some("page-7")).unwrap();
+    assert_eq!(store.inventory_resume(ACCOUNT).unwrap(), None, "complete");
+    store
+        .begin_inventory(ACCOUNT, &DriveFileId::new("root"), "cursor-2")
+        .unwrap();
+    assert_eq!(store.inventory_resume(ACCOUNT).unwrap(), None);
 }

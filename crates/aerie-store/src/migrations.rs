@@ -94,6 +94,8 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (account_id, drive_id)
     );
     UPDATE accounts SET inventory_complete = 0;",
+    // 7: where an unfinished inventory stopped, so a restart continues it.
+    "ALTER TABLE accounts ADD COLUMN inventory_resume TEXT;",
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

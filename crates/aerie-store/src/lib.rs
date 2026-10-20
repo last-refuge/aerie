@@ -133,7 +133,8 @@ impl Store {
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "UPDATE accounts SET root_id = ?2, change_cursor = ?3, inventory_complete = 0
+            "UPDATE accounts SET root_id = ?2, change_cursor = ?3, inventory_complete = 0,
+                inventory_resume = NULL
              WHERE id = ?1",
             params![account, root.as_str(), cursor],
         )?;
@@ -165,11 +166,34 @@ impl Store {
             [account],
         )?;
         tx.execute(
-            "UPDATE accounts SET inventory_complete = 1 WHERE id = ?1",
+            "UPDATE accounts SET inventory_complete = 1, inventory_resume = NULL WHERE id = ?1",
             [account],
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Records where an unfinished inventory got to, in the engine's own format, so a
+    /// restart continues from there instead of listing everything again. `None` forgets it.
+    pub fn set_inventory_resume(&self, account: &str, resume: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE accounts SET inventory_resume = ?2 WHERE id = ?1",
+            params![account, resume],
+        )?;
+        Ok(())
+    }
+
+    /// Where the unfinished inventory stopped, if one is under way.
+    pub fn inventory_resume(&self, account: &str) -> Result<Option<String>> {
+        let resume: Option<Option<String>> = self
+            .conn
+            .query_row(
+                "SELECT inventory_resume FROM accounts WHERE id = ?1 AND inventory_complete = 0",
+                [account],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(resume.flatten())
     }
 
     /// Whether a full inventory has completed. Until then, an empty folder may simply be
@@ -312,7 +336,9 @@ impl Store {
     pub fn set_indexing(&mut self, account: &str, indexing: &Indexing) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "UPDATE accounts SET index_all_drives = ?2, inventory_complete = 0 WHERE id = ?1",
+            "UPDATE accounts SET index_all_drives = ?2, inventory_complete = 0,
+                inventory_resume = NULL
+             WHERE id = ?1",
             params![account, indexing.all],
         )?;
         tx.execute(
