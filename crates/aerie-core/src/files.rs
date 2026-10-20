@@ -26,11 +26,69 @@ pub struct FileEntry {
     pub size: Option<u64>,
     /// Last modification time in Unix seconds.
     pub modified: i64,
+    /// Drive's MIME type; Google-native documents use `application/vnd.google-apps.*`.
+    pub mime_type: String,
+    /// What the signed-in user may do with the item.
+    pub can: Capabilities,
+}
+
+/// Per-item permissions reported by Drive. Actions are offered only when allowed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Capabilities {
+    pub rename: bool,
+    pub trash: bool,
+    pub add_children: bool,
+    pub move_item: bool,
+    pub download: bool,
+    pub edit: bool,
+}
+
+impl Capabilities {
+    pub const ALL: Self = Self {
+        rename: true,
+        trash: true,
+        add_children: true,
+        move_item: true,
+        download: true,
+        edit: true,
+    };
+
+    /// Packs the flags for storage.
+    pub fn bits(self) -> i64 {
+        [
+            self.rename,
+            self.trash,
+            self.add_children,
+            self.move_item,
+            self.download,
+            self.edit,
+        ]
+        .iter()
+        .enumerate()
+        .fold(0, |bits, (index, &set)| bits | (i64::from(set) << index))
+    }
+
+    pub fn from_bits(bits: i64) -> Self {
+        let set = |index: u32| bits & (1 << index) != 0;
+        Self {
+            rename: set(0),
+            trash: set(1),
+            add_children: set(2),
+            move_item: set(3),
+            download: set(4),
+            edit: set(5),
+        }
+    }
 }
 
 impl FileEntry {
     pub fn is_folder(&self) -> bool {
         self.kind == FileKind::Folder
+    }
+
+    /// Docs, Sheets, Slides and similar, which download only as exports.
+    pub fn is_google_native(&self) -> bool {
+        self.mime_type.starts_with("application/vnd.google-apps.") && !self.is_folder()
     }
 }
 
@@ -71,6 +129,20 @@ pub fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packs_capabilities() {
+        let can = Capabilities {
+            rename: true,
+            move_item: true,
+            ..Capabilities::default()
+        };
+        assert_eq!(Capabilities::from_bits(can.bits()), can);
+        assert_eq!(
+            Capabilities::from_bits(Capabilities::ALL.bits()),
+            Capabilities::ALL
+        );
+    }
 
     #[test]
     fn formats_small_sizes_in_bytes() {

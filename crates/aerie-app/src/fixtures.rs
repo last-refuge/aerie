@@ -1,6 +1,6 @@
 //! Sample Drive contents shown until the Drive adapter is connected.
 
-use aerie_core::{DriveFileId, FileEntry, FileKind};
+use aerie_core::{Capabilities, DriveFileId, FileEntry, FileKind};
 
 pub const ROOT_ID: &str = "root";
 
@@ -49,6 +49,8 @@ pub fn sample_entries() -> Vec<FileEntry> {
             kind,
             size,
             modified: OCT_1_2026 + (day - 1) * DAY + hour * HOUR,
+            mime_type: String::new(),
+            can: Capabilities::ALL,
         })
         .collect()
 }

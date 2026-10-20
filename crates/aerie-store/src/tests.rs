@@ -10,6 +10,11 @@ fn entry(id: &str, parent: &str, name: &str, kind: FileKind, modified: i64) -> F
         kind,
         size: (kind != FileKind::Folder).then_some(1_000),
         modified,
+        mime_type: "application/pdf".into(),
+        can: aerie_core::Capabilities {
+            rename: true,
+            ..Default::default()
+        },
     }
 }
 
@@ -46,9 +51,9 @@ fn migrates_to_the_latest_schema_once() {
     let dir = std::env::temp_dir().join(format!("aerie-store-{}", std::process::id()));
     let path = dir.join("nested/aerie.sqlite3");
     let first = Store::open(&path).unwrap();
-    assert_eq!(first.schema_version().unwrap(), 1);
+    assert_eq!(first.schema_version().unwrap(), 2);
     drop(first);
-    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 1);
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 2);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -172,6 +177,20 @@ fn searches_names_case_insensitively_and_literally() {
         ["100% done.txt"]
     );
     assert_eq!(store.search(ACCOUNT, "e", 1).unwrap().len(), 1);
+}
+
+#[test]
+fn infers_the_root_from_orphaned_parents() {
+    let store = inventoried(&[
+        entry("a", "real-root", "A", FileKind::Folder, 1),
+        entry("b", "real-root", "B", FileKind::Pdf, 1),
+        entry("c", "a", "C", FileKind::Pdf, 1),
+        entry("d", "shared-elsewhere", "D", FileKind::Pdf, 1),
+    ]);
+    assert_eq!(
+        store.likely_root(ACCOUNT).unwrap(),
+        Some(DriveFileId::new("real-root"))
+    );
 }
 
 #[test]

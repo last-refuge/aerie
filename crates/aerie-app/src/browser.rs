@@ -6,7 +6,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use aerie_core::{
-    BrowseState, DriveFileId, FileEntry, FileKind, MemoryCatalog, compare_names, format_size,
+    BrowseState, Catalog, DriveFileId, FileEntry, FileKind, MemoryCatalog, compare_names,
+    format_size,
 };
 use aerie_store::Account;
 use gtk::{gio, glib};
@@ -31,7 +32,7 @@ pub fn build_window(app: &adw::Application) {
 
     let (events, inbox) = async_channel::unbounded();
     let engine = Rc::new(Engine::start(events));
-    let browser = Browser::new();
+    let browser = Browser::new(engine.clone());
     let welcome = Welcome::new(engine.clone());
     let split = browser.split_view();
 
@@ -98,8 +99,6 @@ fn install_actions(
             }
         }
     ));
-    // Creating folders on Drive arrives with file actions; until then only sample data
-    // offers it.
     let new_folder = gio::SimpleAction::new("new-folder", None);
     new_folder.connect_activate(glib::clone!(
         #[strong]
@@ -117,8 +116,45 @@ fn install_actions(
         move |_, _| {
             welcome.set_waiting(true);
             stack.set_visible_child_name("welcome");
-            engine.send(Command::SignIn);
+            engine.send(Command::SignIn { write: false });
         }
+    ));
+    let allow_changes = gio::SimpleAction::new("allow-changes", None);
+    allow_changes.connect_activate(glib::clone!(
+        #[strong]
+        engine,
+        #[weak]
+        window,
+        move |_, _| {
+            let engine = engine.clone();
+            crate::actions::ask_for_write_access(&window, move || {
+                engine.send(Command::SignIn { write: true });
+            });
+        }
+    ));
+    let rename = gio::SimpleAction::new("rename", None);
+    rename.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.rename_selected()
+    ));
+    let move_to = gio::SimpleAction::new("move", None);
+    move_to.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.move_selected()
+    ));
+    let trash = gio::SimpleAction::new("trash", None);
+    trash.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.trash_selected()
+    ));
+    let open_in_drive = gio::SimpleAction::new("open-in-drive", None);
+    open_in_drive.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.open_selected_in_drive()
     ));
     let sign_out = gio::SimpleAction::new("sign-out", None);
     sign_out.set_enabled(false);
@@ -133,9 +169,21 @@ fn install_actions(
         engine,
         move |_, _| engine.send(Command::Refresh)
     ));
-    for action in [&search, &new_folder, &sign_in, &sign_out, &refresh] {
+    for action in [
+        &search,
+        &new_folder,
+        &sign_in,
+        &allow_changes,
+        &sign_out,
+        &refresh,
+        &rename,
+        &move_to,
+        &trash,
+        &open_in_drive,
+    ] {
         window.add_action(action);
     }
+    browser.update_actions();
 }
 
 fn set_action_enabled(window: &adw::ApplicationWindow, name: &str, enabled: bool) {
@@ -157,17 +205,26 @@ fn handle_event(
 ) {
     match event {
         Event::OpenUri(uri) => open_uri(window, &uri),
-        Event::SignInStarted => welcome.set_waiting(true),
+        Event::SignInStarted => {
+            welcome.set_waiting(true);
+            if browser.is_drive() {
+                toasts.add_toast(adw::Toast::new("Continue in your browser."));
+            }
+        }
         Event::SignInFailed(message) => {
             welcome.set_waiting(false);
-            welcome.show_error(&message);
-            stack.set_visible_child_name("welcome");
+            if browser.is_drive() {
+                // A failed upgrade to write access leaves the read-only session in place.
+                toasts.add_toast(adw::Toast::new(&message));
+            } else {
+                welcome.show_error(&message);
+                stack.set_visible_child_name("welcome");
+            }
         }
         Event::SignedIn(account) => {
             welcome.set_waiting(false);
             browser.show_drive(&account);
             set_action_enabled(window, "sign-out", true);
-            set_action_enabled(window, "new-folder", false);
             stack.set_visible_child_name("browser");
         }
         Event::NeedsSignIn { expired } => {
@@ -182,7 +239,6 @@ fn handle_event(
         Event::SignedOut => {
             browser.show_samples();
             set_action_enabled(window, "sign-out", false);
-            set_action_enabled(window, "new-folder", true);
             welcome.show_error("");
             stack.set_visible_child_name("welcome");
         }
@@ -191,6 +247,20 @@ fn handle_event(
         Event::CatalogChanged => browser.reload(),
         Event::Offline => browser.set_status(Status::Offline),
         Event::Problem(message) => toasts.add_toast(adw::Toast::new(&message)),
+        Event::NeedsWriteAccess => {
+            let _ = WidgetExt::activate_action(window, "win.allow-changes", None);
+        }
+        Event::Done { message, undo } => {
+            let toast = adw::Toast::new(&message);
+            if let Some(id) = undo {
+                toast.set_button_label(Some("Undo"));
+                let engine = browser.engine.clone();
+                toast.connect_button_clicked(move |_| {
+                    engine.send(Command::Untrash { id: id.clone() });
+                });
+            }
+            toasts.add_toast(toast);
+        }
     }
 }
 
@@ -312,6 +382,8 @@ enum Status {
 
 /// Widgets over a [`BrowseState`]. Navigation and search rebuild the visible list.
 struct Browser {
+    engine: Rc<Engine>,
+    selection: gtk::SingleSelection,
     state: RefCell<BrowseState<AppCatalog>>,
     account: RefCell<Option<Account>>,
     indexing: Cell<bool>,
@@ -329,7 +401,7 @@ struct Browser {
 }
 
 impl Browser {
-    fn new() -> Rc<Self> {
+    fn new(engine: Rc<Engine>) -> Rc<Self> {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let sorted = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
         let selection = gtk::SingleSelection::new(Some(sorted.clone()));
@@ -384,6 +456,8 @@ impl Browser {
         content.add_named(&empty, Some("empty"));
 
         let browser = Rc::new(Self {
+            engine,
+            selection: selection.clone(),
             state: RefCell::new(samples()),
             account: RefCell::default(),
             indexing: Cell::new(false),
@@ -441,9 +515,154 @@ impl Browser {
             }
         ));
 
+        browser.selection.connect_selected_item_notify(glib::clone!(
+            #[weak]
+            browser,
+            move |_| browser.update_actions()
+        ));
+        browser.install_context_menu();
+
         browser.set_status(Status::Samples);
         browser.refresh();
         browser
+    }
+
+    fn selected(&self) -> Option<FileEntry> {
+        self.selection
+            .selected_item()
+            .map(|item| entry_of(&item).clone())
+    }
+
+    fn window(&self) -> Option<adw::ApplicationWindow> {
+        self.view.root().and_downcast::<adw::ApplicationWindow>()
+    }
+
+    /// Enables only the actions that make sense for the selection and the item's
+    /// permissions. Sample data supports nothing but new folders.
+    fn update_actions(&self) {
+        let Some(window) = self.window() else { return };
+        let drive = self.is_drive();
+        let selected = self.selected().filter(|_| drive);
+        let can = selected.as_ref().map(|entry| entry.can).unwrap_or_default();
+        set_action_enabled(&window, "rename", can.rename);
+        set_action_enabled(&window, "move", can.move_item);
+        set_action_enabled(&window, "trash", can.trash);
+        set_action_enabled(&window, "open-in-drive", selected.is_some());
+        let state = self.state.borrow();
+        let folder_allows = state
+            .catalog()
+            .get(state.current_folder())
+            .is_none_or(|folder| folder.can.add_children);
+        set_action_enabled(
+            &window,
+            "new-folder",
+            !state.is_searching() && folder_allows,
+        );
+    }
+
+    /// Right-click, or the Menu key, opens actions for the item under the pointer.
+    fn install_context_menu(self: &Rc<Self>) {
+        let menu = gio::Menu::new();
+        menu.append(Some("Open in Google Drive"), Some("win.open-in-drive"));
+        let edit = gio::Menu::new();
+        edit.append(Some("Rename…"), Some("win.rename"));
+        edit.append(Some("Move to…"), Some("win.move"));
+        menu.append_section(None, &edit);
+        let danger = gio::Menu::new();
+        danger.append(Some("Move to Trash"), Some("win.trash"));
+        menu.append_section(None, &danger);
+        let popover = gtk::PopoverMenu::builder()
+            .menu_model(&menu)
+            .has_arrow(false)
+            .halign(gtk::Align::Start)
+            .build();
+        popover.set_parent(&self.view);
+
+        let click = gtk::GestureClick::builder()
+            .button(gtk::gdk::BUTTON_SECONDARY)
+            .build();
+        click.connect_pressed(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            #[weak]
+            popover,
+            move |gesture, _, x, y| {
+                if !browser.is_drive() {
+                    return;
+                }
+                browser.select_at(x, y);
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                popover.popup();
+            }
+        ));
+        self.view.add_controller(click);
+    }
+
+    /// Selects the row under a point, found through the entry ID each cell carries.
+    fn select_at(&self, x: f64, y: f64) {
+        let mut widget = self.view.pick(x, y, gtk::PickFlags::DEFAULT);
+        while let Some(current) = widget {
+            if let Some(id) = current.widget_name().strip_prefix(ENTRY_PREFIX) {
+                let position = (0..self.selection.n_items()).find(|&position| {
+                    self.selection
+                        .item(position)
+                        .is_some_and(|item| entry_of(&item).id.as_str() == id)
+                });
+                if let Some(position) = position {
+                    self.selection.set_selected(position);
+                }
+                return;
+            }
+            widget = current.parent();
+        }
+    }
+
+    fn rename_selected(self: &Rc<Self>) {
+        let Some(entry) = self.selected() else { return };
+        let engine = self.engine.clone();
+        let id = entry.id.clone();
+        crate::actions::rename(&self.view, &entry, move |name| {
+            engine.send(Command::Rename {
+                id: id.clone(),
+                name,
+            });
+        });
+    }
+
+    fn move_selected(self: &Rc<Self>) {
+        let Some(entry) = self.selected() else { return };
+        let Some(from) = entry.parent.clone() else {
+            return;
+        };
+        let root = self.state.borrow().root().clone();
+        let children: crate::actions::Children = Rc::new(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            #[upgrade_or_default]
+            move |folder: &DriveFileId| browser.state.borrow().catalog().children(folder)
+        ));
+        let engine = self.engine.clone();
+        let id = entry.id.clone();
+        crate::actions::move_to(&self.view, children, root, entry, move |to| {
+            engine.send(Command::Move {
+                id: id.clone(),
+                from: from.clone(),
+                to,
+            });
+        });
+    }
+
+    fn trash_selected(&self) {
+        if let Some(entry) = self.selected() {
+            self.engine.send(Command::Trash { id: entry.id });
+        }
+    }
+
+    fn open_selected_in_drive(&self) {
+        if let (Some(entry), Some(window)) = (self.selected(), self.window()) {
+            open_uri(&window, &drive_url(&entry));
+        }
     }
 
     fn split_view(self: &Rc<Self>) -> adw::NavigationSplitView {
@@ -654,11 +873,8 @@ impl Browser {
             }
         } else if self.is_drive() {
             // Opening and downloading arrive with transfers; for now, open it in Drive.
-            if let Some(window) = self.view.root().and_downcast::<adw::ApplicationWindow>() {
-                open_uri(
-                    &window,
-                    &format!("https://drive.google.com/open?id={}", entry.id.as_str()),
-                );
+            if let Some(window) = self.window() {
+                open_uri(&window, &drive_url(entry));
             }
         }
     }
@@ -697,6 +913,7 @@ impl Browser {
             self.content.set_visible_child_name("list");
         }
         self.rebuild_breadcrumbs(searching);
+        self.update_actions();
     }
 
     /// An unfinished inventory must never look like an empty Drive.
@@ -792,11 +1009,23 @@ impl Browser {
                 self,
                 #[weak]
                 entry,
-                move |_, _| browser.create_sample_folder(entry.text().trim())
+                move |_, _| browser.create_folder(entry.text().trim())
             ),
         );
         dialog.present(Some(&self.view));
         entry.grab_focus();
+    }
+
+    fn create_folder(self: &Rc<Self>, name: &str) {
+        if self.is_drive() {
+            let parent = self.state.borrow().current_folder().clone();
+            self.engine.send(Command::CreateFolder {
+                parent,
+                name: name.to_owned(),
+            });
+            return;
+        }
+        self.create_sample_folder(name);
     }
 
     fn create_sample_folder(self: &Rc<Self>, name: &str) {
@@ -815,6 +1044,8 @@ impl Browser {
                 kind: FileKind::Folder,
                 size: None,
                 modified: glib::DateTime::now_local().map_or(0, |now| now.to_unix()),
+                mime_type: String::new(),
+                can: aerie_core::Capabilities::ALL,
             }));
             let depth = state.depth();
             state.go_to_depth(depth);
@@ -905,8 +1136,16 @@ fn name_factory() -> gtk::SignalListItemFactory {
             icon.remove_css_class("folder");
         }
         label.set_label(&entry.name);
+        row.set_widget_name(&format!("{ENTRY_PREFIX}{}", entry.id.as_str()));
     });
     factory
+}
+
+/// Cells name themselves after their entry so a right-click can find its row.
+const ENTRY_PREFIX: &str = "entry:";
+
+fn drive_url(entry: &FileEntry) -> String {
+    format!("https://drive.google.com/open?id={}", entry.id.as_str())
 }
 
 fn text_factory(text: impl Fn(&FileEntry) -> String + 'static) -> gtk::SignalListItemFactory {
@@ -925,6 +1164,7 @@ fn text_factory(text: impl Fn(&FileEntry) -> String + 'static) -> gtk::SignalLis
         let entry = entry_of(&object);
         let label = item.child().and_downcast::<gtk::Label>().expect("label");
         label.set_label(&text(&entry));
+        label.set_widget_name(&format!("{ENTRY_PREFIX}{}", entry.id.as_str()));
     });
     factory
 }

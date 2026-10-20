@@ -28,6 +28,10 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (account_id, id)
     );
     CREATE INDEX files_by_parent ON files (account_id, parent_id);",
+    // 2: MIME types and per-item capabilities. Cached rows lack them, so re-inventory.
+    "ALTER TABLE files ADD COLUMN mime_type TEXT NOT NULL DEFAULT '';
+    ALTER TABLE files ADD COLUMN capabilities INTEGER NOT NULL DEFAULT 0;
+    UPDATE accounts SET inventory_complete = 0;",
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

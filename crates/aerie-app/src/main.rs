@@ -1,5 +1,6 @@
 //! Aerie desktop application.
 
+mod actions;
 mod app_menu;
 mod browser;
 mod catalog;
@@ -25,6 +26,9 @@ fn main() -> glib::ExitCode {
         app_menu::install(app);
         app.set_accels_for_action("win.search", &["<Control>k", "<Control>f"]);
         app.set_accels_for_action("win.new-folder", &["<Control><Shift>n"]);
+        app.set_accels_for_action("win.rename", &["F2"]);
+        app.set_accels_for_action("win.move", &["<Control>m"]);
+        app.set_accels_for_action("win.trash", &["Delete"]);
     });
     app.connect_activate(browser::build_window);
     app.run()

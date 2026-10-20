@@ -53,6 +53,7 @@ async fn main() -> Result<(), Error> {
     resumable_upload(&drive, &folder.id, &http, &access_token).await?;
     let race_file = overwrite_race(&drive, &folder.id, &http, &access_token).await?;
     lost_update(&drive, &race_file).await?;
+    file_actions(&drive, &folder.id).await?;
     println!("\nDone. The test files are in My Drive › {FOLDER}; delete them whenever you like.");
     Ok(())
 }
@@ -256,6 +257,37 @@ async fn lost_update(drive: &DriveApi, file: &DriveFileId) -> Result<(), Error> 
     if recovered != sneaky {
         return Err("recovered revision doesn't match".into());
     }
+    Ok(())
+}
+
+/// Creates, renames, moves, trashes and restores items, checking each result.
+async fn file_actions(drive: &DriveApi, folder: &DriveFileId) -> Result<(), Error> {
+    println!("\nFile actions");
+    let outer = drive.create_folder(folder, "actions-test").await?;
+    let inner = drive.create_folder(folder, "move-me").await?;
+    let renamed = drive.rename(&inner.id, "moved-and-renamed").await?;
+    let moved = drive.move_to(&renamed.id, folder, &outer.id).await?;
+    let in_outer = moved.parent.as_ref() == Some(&outer.id);
+    println!(
+        "  created, renamed to {:?}, moved into the new folder: {}",
+        moved.name,
+        if in_outer { "yes" } else { "NO" }
+    );
+    drive.trash(&moved.id).await?;
+    let gone = drive
+        .find_folder(&outer.id, "moved-and-renamed")
+        .await?
+        .is_none();
+    drive.untrash(&moved.id).await?;
+    let back = drive
+        .find_folder(&outer.id, "moved-and-renamed")
+        .await?
+        .is_some();
+    println!("  trashed (hidden: {gone}), restored (visible again: {back})");
+    if !(in_outer && gone && back) {
+        return Err("a file action didn't behave as expected".into());
+    }
+    println!("  capabilities reported: {:?}", moved.can);
     Ok(())
 }
 

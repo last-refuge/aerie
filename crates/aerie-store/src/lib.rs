@@ -7,7 +7,7 @@ mod migrations;
 
 use std::path::{Path, PathBuf};
 
-use aerie_core::{Change, DriveFileId, FileEntry, FileKind};
+use aerie_core::{Capabilities, Change, DriveFileId, FileEntry, FileKind};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use thiserror::Error;
 
@@ -182,6 +182,31 @@ impl Store {
         Ok(root.flatten().map(DriveFileId::new))
     }
 
+    pub fn set_root(&self, account: &str, root: &DriveFileId) -> Result<()> {
+        self.conn.execute(
+            "UPDATE accounts SET root_id = ?2 WHERE id = ?1",
+            params![account, root.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Guesses the root folder when it can't be read directly: the parent that isn't itself
+    /// cached and holds the most items. Only narrow development scopes need this.
+    pub fn likely_root(&self, account: &str) -> Result<Option<DriveFileId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT parent_id FROM files AS f
+                 WHERE account_id = ?1 AND parent_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM files WHERE account_id = ?1 AND id = f.parent_id)
+                 GROUP BY parent_id ORDER BY COUNT(*) DESC LIMIT 1",
+                [account],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(DriveFileId::new))
+    }
+
     pub fn change_cursor(&self, account: &str) -> Result<Option<String>> {
         let cursor: Option<Option<String>> = self
             .conn
@@ -217,9 +242,28 @@ impl Store {
         Ok(())
     }
 
+    /// Records the result of an action Aerie just performed, ahead of the change log,
+    /// without moving the change cursor. The change log later confirms the same state.
+    pub fn apply_local(&mut self, account: &str, changes: &[Change]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        for change in changes {
+            match change {
+                Change::Upsert(entry) => upsert(&tx, account, entry)?,
+                Change::Removed(id) => {
+                    tx.execute(
+                        "DELETE FROM files WHERE account_id = ?1 AND id = ?2",
+                        params![account, id.as_str()],
+                    )?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn children(&self, account: &str, folder: &DriveFileId) -> Result<Vec<FileEntry>> {
         let mut statement = self.conn.prepare_cached(
-            "SELECT id, parent_id, name, kind, size, modified FROM files
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities FROM files
              WHERE account_id = ?1 AND parent_id = ?2",
         )?;
         let rows = statement.query_map(params![account, folder.as_str()], entry_from_row)?;
@@ -230,7 +274,7 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT id, parent_id, name, kind, size, modified FROM files
+                "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities FROM files
                  WHERE account_id = ?1 AND id = ?2",
                 params![account, id.as_str()],
                 entry_from_row,
@@ -249,7 +293,7 @@ impl Store {
                 .replace('_', "\\_")
         );
         let mut statement = self.conn.prepare_cached(
-            "SELECT id, parent_id, name, kind, size, modified FROM files
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities FROM files
              WHERE account_id = ?1 AND name LIKE ?2 ESCAPE '\\'
              ORDER BY modified DESC LIMIT ?3",
         )?;
@@ -260,10 +304,12 @@ impl Store {
 
 fn upsert(conn: &Connection, account: &str, entry: &FileEntry) -> Result<()> {
     conn.execute(
-        "INSERT INTO files (account_id, id, parent_id, name, kind, size, modified, inventoried)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
+        "INSERT INTO files (account_id, id, parent_id, name, kind, size, modified, mime_type,
+                            capabilities, inventoried)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
          ON CONFLICT (account_id, id) DO UPDATE SET
-           parent_id = ?3, name = ?4, kind = ?5, size = ?6, modified = ?7, inventoried = 1",
+           parent_id = ?3, name = ?4, kind = ?5, size = ?6, modified = ?7, mime_type = ?8,
+           capabilities = ?9, inventoried = 1",
         params![
             account,
             entry.id.as_str(),
@@ -272,6 +318,8 @@ fn upsert(conn: &Connection, account: &str, entry: &FileEntry) -> Result<()> {
             kind_name(entry.kind),
             entry.size.map(|size| size as i64),
             entry.modified,
+            entry.mime_type,
+            entry.can.bits(),
         ],
     )?;
     Ok(())
@@ -285,6 +333,8 @@ fn entry_from_row(row: &Row<'_>) -> rusqlite::Result<FileEntry> {
         kind: kind_from_name(&row.get::<_, String>(3)?),
         size: row.get::<_, Option<i64>>(4)?.map(|size| size as u64),
         modified: row.get(5)?,
+        mime_type: row.get(6)?,
+        can: Capabilities::from_bits(row.get(7)?),
     })
 }
 
