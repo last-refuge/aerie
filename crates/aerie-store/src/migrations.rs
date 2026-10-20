@@ -1,0 +1,49 @@
+//! Schema migrations, tracked with SQLite's `user_version`. Each step runs in its own
+//! transaction, so a failed migration leaves the previous schema intact.
+
+use rusqlite::Connection;
+
+use crate::{Error, Result};
+
+const MIGRATIONS: &[&str] = &[
+    // 1: accounts and cached metadata.
+    "CREATE TABLE accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        root_id TEXT,
+        change_cursor TEXT,
+        inventory_complete INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE files (
+        account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        parent_id TEXT,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        size INTEGER,
+        modified INTEGER NOT NULL,
+        -- Cleared when an inventory starts and set as each entry is seen again.
+        inventoried INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (account_id, id)
+    );
+    CREATE INDEX files_by_parent ON files (account_id, parent_id);",
+];
+
+pub fn run(conn: &mut Connection) -> Result<()> {
+    let known = MIGRATIONS.len() as i64;
+    let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if current > known {
+        return Err(Error::NewerSchema {
+            found: current,
+            known,
+        });
+    }
+    for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+        let tx = conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", index as i64 + 1)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
