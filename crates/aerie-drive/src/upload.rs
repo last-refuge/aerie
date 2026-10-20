@@ -168,6 +168,22 @@ impl DriveApi {
     where
         R: AsyncRead + AsyncSeek + Unpin,
     {
+        self.upload_with_progress(session, source, chunk_size, retry, |_| {})
+            .await
+    }
+
+    /// Like [`Self::upload`], reporting how many bytes Drive holds after each chunk.
+    pub async fn upload_with_progress<R>(
+        &self,
+        session: &UploadSession,
+        source: &mut R,
+        chunk_size: usize,
+        retry: RetryPolicy,
+        mut on_progress: impl FnMut(u64),
+    ) -> Result<FileEntry>
+    where
+        R: AsyncRead + AsyncSeek + Unpin,
+    {
         assert!(
             chunk_size > 0 && chunk_size.is_multiple_of(CHUNK_UNIT),
             "chunk size must be a multiple of 256 KiB"
@@ -180,6 +196,7 @@ impl DriveApi {
                 Ok(UploadProgress::Complete(entry)) => return Ok(entry),
                 Ok(UploadProgress::Partial { received }) => {
                     failures = 0;
+                    on_progress(received);
                     received
                 }
                 Err(err) if is_transient(&err) && failures < retry.attempts => {

@@ -2,16 +2,19 @@
 //! own async runtime. The UI sends [`Command`]s and receives [`Event`]s; neither side
 //! blocks the other, and the GTK main thread never waits on the network or the disk.
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use aerie_core::{Change, DriveFileId, redact};
+use aerie_core::{Change, DriveFileId, FileEntry, redact};
 use aerie_drive::api::{ChangeCursor, DriveApi};
 use aerie_drive::auth::{self, DRIVE, DRIVE_FILE, DRIVE_READONLY};
 use aerie_drive::client::OAuthClient;
 use aerie_drive::{Error as DriveError, credentials, http_client};
-use aerie_store::{Account, Store};
+use aerie_store::{Account, Direction, NewTransfer, Store, TransferState};
 use async_channel::{Receiver, Sender};
 use tokio::task::JoinHandle;
+
+use crate::transfers;
 
 /// The scopes Aerie asks for: read-only until the user first changes something, then full
 /// Drive access. `AERIE_DEV_SCOPE=drive.file` confines a development build to files Aerie
@@ -55,6 +58,28 @@ pub enum Command {
     Untrash {
         id: DriveFileId,
     },
+    /// Upload local files into a Drive folder.
+    Upload {
+        files: Vec<LocalFile>,
+        parent: DriveFileId,
+    },
+    /// Download a file, or export a Google-native document as `export_mime`.
+    Download {
+        entry: FileEntry,
+        destination: PathBuf,
+        export_mime: Option<String>,
+    },
+    PauseTransfer(i64),
+    ResumeTransfer(i64),
+    CancelTransfer(i64),
+    ClearFinishedTransfers,
+}
+
+/// A local file chosen for upload.
+#[derive(Debug, Clone)]
+pub struct LocalFile {
+    pub path: PathBuf,
+    pub mime_type: String,
 }
 
 #[derive(Debug)]
@@ -81,6 +106,13 @@ pub enum Event {
     Problem(String),
     /// The session is read-only; changing files needs a new consent from Google.
     NeedsWriteAccess,
+    /// The transfer list changed; re-read it from the store.
+    TransfersChanged,
+    TransferProgress {
+        id: i64,
+        done: u64,
+        total: Option<u64>,
+    },
     /// A file action finished. `undo` restores a trashed item.
     Done {
         message: String,
@@ -130,6 +162,7 @@ struct Worker {
     session: Option<Session>,
     sign_in: Option<JoinHandle<aerie_drive::Result<auth::Tokens>>>,
     sign_in_scope: &'static str,
+    transfer: Option<(i64, JoinHandle<aerie_drive::Result<transfers::Outcome>>)>,
     poll_delay: Duration,
     offline: bool,
     /// Commands that arrived during a long inventory, handled once it finishes.
@@ -145,6 +178,7 @@ impl Worker {
             session: None,
             sign_in: None,
             sign_in_scope: DRIVE_READONLY,
+            transfer: None,
             poll_delay: FASTEST_POLL,
             offline: false,
             pending: Vec::new(),
@@ -181,22 +215,33 @@ impl Worker {
             let inbox = self.inbox.clone();
             let mut sign_in = self.sign_in.take();
             let waiting_for_browser = sign_in.is_some();
+            let mut transfer = self.transfer.take();
+            let transferring = transfer.is_some();
             tokio::select! {
                 command = inbox.recv() => {
                     self.sign_in = sign_in;
+                    self.transfer = transfer;
                     match command {
                         Ok(command) => self.handle(command).await,
                         Err(_) => return,
                     }
                 }
                 result = async { sign_in.as_mut().expect("guarded").await }, if waiting_for_browser => {
+                    self.transfer = transfer;
                     self.finish_sign_in(result).await;
+                }
+                result = async { (&mut transfer.as_mut().expect("guarded").1).await }, if transferring => {
+                    self.sign_in = sign_in;
+                    let id = transfer.expect("guarded").0;
+                    self.finish_transfer(id, result).await;
                 }
                 () = tokio::time::sleep(delay), if polling => {
                     self.sign_in = sign_in;
+                    self.transfer = transfer;
                     self.check().await;
                 }
             }
+            self.pump_transfers().await;
         }
     }
 
@@ -214,6 +259,26 @@ impl Worker {
                 self.poll_delay = FASTEST_POLL;
                 if self.session.is_some() {
                     self.check().await;
+                }
+            }
+            Command::Upload { files, parent } => self.queue_uploads(files, parent).await,
+            Command::Download {
+                entry,
+                destination,
+                export_mime,
+            } => self.queue_download(entry, destination, export_mime),
+            Command::PauseTransfer(id) => self.stop_transfer(id, TransferState::Paused),
+            Command::CancelTransfer(id) => self.stop_transfer(id, TransferState::Cancelled),
+            Command::ResumeTransfer(id) => {
+                let _ = self
+                    .store()
+                    .set_transfer_state(id, TransferState::Queued, None);
+                self.emit(Event::TransfersChanged);
+            }
+            Command::ClearFinishedTransfers => {
+                if let Some(account) = self.session.as_ref().map(|s| s.account.clone()) {
+                    let _ = self.store().clear_finished_transfers(&account);
+                    self.emit(Event::TransfersChanged);
                 }
             }
             action => self.act(action).await,
@@ -273,6 +338,7 @@ impl Worker {
             },
         };
         session.account = account.id.clone();
+        let _ = self.store().requeue_interrupted_transfers(&account.id);
         self.session = Some(session);
         self.emit(Event::SignedIn(account));
         self.check().await;
@@ -384,6 +450,9 @@ impl Worker {
     }
 
     async fn sign_out(&mut self) {
+        if let Some((_, task)) = self.transfer.take() {
+            task.abort();
+        }
         if let Some(session) = self.session.take() {
             let _ = self.store().forget_account(&session.account);
         }
@@ -460,6 +529,195 @@ impl Worker {
         session.drive.set_access_token(tokens.access_token);
         session.expires_at = tokens.expires_at;
         Ok(())
+    }
+
+    fn can_write(&self) -> bool {
+        let (read, write) = scopes();
+        self.session
+            .as_ref()
+            .is_some_and(|session| read == write || session.scope == write)
+    }
+
+    async fn queue_uploads(&mut self, files: Vec<LocalFile>, parent: DriveFileId) {
+        if !self.can_write() {
+            return self.emit(Event::NeedsWriteAccess);
+        }
+        let Some(account) = self.session.as_ref().map(|s| s.account.clone()) else {
+            return;
+        };
+        for file in files {
+            let Ok(metadata) = std::fs::metadata(&file.path) else {
+                continue;
+            };
+            if !metadata.is_file() {
+                // Folders upload with sync, not as manual transfers.
+                self.emit(Event::Problem(
+                    "Only files can be uploaded here; folders aren't supported yet.".into(),
+                ));
+                continue;
+            }
+            let name = file
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let new = NewTransfer {
+                direction: Direction::Upload,
+                file_id: None,
+                parent_id: Some(parent.clone()),
+                name,
+                local_path: file.path,
+                mime_type: file.mime_type,
+                export_mime: None,
+                total: Some(metadata.len()),
+                replaces_mtime: None,
+            };
+            if let Err(err) = self.store().add_transfer(&account, &new, unix_now()) {
+                tracing::error!(%err, "couldn't queue an upload");
+            }
+        }
+        self.emit(Event::TransfersChanged);
+    }
+
+    fn queue_download(
+        &mut self,
+        entry: FileEntry,
+        destination: PathBuf,
+        export_mime: Option<String>,
+    ) {
+        let Some(account) = self.session.as_ref().map(|s| s.account.clone()) else {
+            return;
+        };
+        let new = NewTransfer {
+            direction: Direction::Download,
+            file_id: Some(entry.id),
+            parent_id: None,
+            name: destination
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or(entry.name),
+            replaces_mtime: transfers::modified_time(&destination),
+            local_path: destination,
+            mime_type: entry.mime_type,
+            total: if export_mime.is_some() {
+                None
+            } else {
+                entry.size
+            },
+            export_mime,
+        };
+        if let Err(err) = self.store().add_transfer(&account, &new, unix_now()) {
+            tracing::error!(%err, "couldn't queue a download");
+        }
+        self.emit(Event::TransfersChanged);
+    }
+
+    /// Pauses or cancels a transfer. A paused download keeps its partial file; a
+    /// cancelled one removes it.
+    fn stop_transfer(&mut self, id: i64, state: TransferState) {
+        if self
+            .transfer
+            .as_ref()
+            .is_some_and(|(running, _)| *running == id)
+        {
+            let (_, task) = self.transfer.take().expect("checked");
+            task.abort();
+        }
+        if state == TransferState::Cancelled
+            && let Ok(Some(transfer)) = self.store().transfer(id)
+            && transfer.direction == Direction::Download
+        {
+            let _ = std::fs::remove_file(transfers::partial_path(&transfer.local_path));
+        }
+        let _ = self.store().set_transfer_state(id, state, None);
+        self.emit(Event::TransfersChanged);
+    }
+
+    /// Starts the next queued transfer when nothing else is running.
+    async fn pump_transfers(&mut self) {
+        if self.transfer.is_some() || self.offline {
+            return;
+        }
+        let Some(account) = self.session.as_ref().map(|s| s.account.clone()) else {
+            return;
+        };
+        let Ok(Some(transfer)) = self.store().next_queued_transfer(&account) else {
+            return;
+        };
+        if transfer.direction == Direction::Upload && !self.can_write() {
+            return;
+        }
+        if let Err(err) = self.ensure_token().await {
+            tracing::info!(%err, "transfers wait for a working sign-in");
+            return;
+        }
+        let _ = self
+            .store()
+            .set_transfer_state(transfer.id, TransferState::Running, None);
+        self.emit(Event::TransfersChanged);
+        let drive = self.session.as_ref().expect("checked").drive.clone();
+        let id = transfer.id;
+        let task = tokio::spawn(transfers::run(
+            drive,
+            transfer,
+            self.events.clone(),
+            Store::default_path(),
+        ));
+        self.transfer = Some((id, task));
+    }
+
+    async fn finish_transfer(
+        &mut self,
+        id: i64,
+        result: Result<aerie_drive::Result<transfers::Outcome>, tokio::task::JoinError>,
+    ) {
+        let account = self.session.as_ref().map(|s| s.account.clone());
+        match result {
+            // Aborted by pause, cancel or sign-out, which already updated the state.
+            Err(_) => {}
+            Ok(Ok(transfers::Outcome::Uploaded(entry))) => {
+                let _ = self.store().set_transfer_file(id, &entry.id);
+                let _ = self
+                    .store()
+                    .set_transfer_state(id, TransferState::Done, None);
+                if let Some(account) = account {
+                    let _ = self.store().apply_local(&account, &[Change::Upsert(entry)]);
+                }
+                self.emit(Event::CatalogChanged);
+            }
+            Ok(Ok(transfers::Outcome::Downloaded(path))) => {
+                let renamed = self
+                    .store()
+                    .transfer(id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|t| t.local_path != path);
+                let _ = self.store().set_transfer_path(id, &path);
+                let _ = self
+                    .store()
+                    .set_transfer_state(id, TransferState::Done, None);
+                if renamed {
+                    self.emit(Event::Problem(format!(
+                        "The file on your computer changed during the download, so Aerie saved Drive's copy as “{}”.",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    )));
+                }
+            }
+            Ok(Err(err)) => {
+                let offline = err.is_offline();
+                tracing::warn!(transfer = id, %err, "transfer failed");
+                // Offline transfers wait in the queue; anything else needs the user.
+                let state = if offline {
+                    self.offline = true;
+                    TransferState::Queued
+                } else {
+                    TransferState::Failed
+                };
+                let message = err.to_string();
+                let _ = self.store().set_transfer_state(id, state, Some(&message));
+            }
+        }
+        self.emit(Event::TransfersChanged);
     }
 
     /// Runs a file action and records its result locally at once; the change log confirms
@@ -636,6 +894,12 @@ impl Worker {
         }
         Ok(changed)
     }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs() as i64)
 }
 
 fn store_problem(err: aerie_store::Error) -> DriveError {

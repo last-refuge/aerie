@@ -102,10 +102,11 @@ pub enum ChangeCursor {
     CaughtUp(String),
 }
 
+#[derive(Clone)]
 pub struct DriveApi {
     pub(crate) http: reqwest::Client,
     pub(crate) access_token: String,
-    api_base: String,
+    pub(crate) api_base: String,
     pub(crate) upload_base: String,
 }
 

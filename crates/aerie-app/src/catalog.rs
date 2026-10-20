@@ -22,6 +22,10 @@ impl StoreCatalog {
         self.store.root_id(&self.account).ok().flatten()
     }
 
+    pub fn transfers(&self) -> Vec<aerie_store::Transfer> {
+        logged(self.store.transfers(&self.account))
+    }
+
     pub fn inventory_complete(&self) -> bool {
         self.store
             .inventory_complete(&self.account)

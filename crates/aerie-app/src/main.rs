@@ -7,6 +7,8 @@ mod catalog;
 mod diagnostics;
 mod engine;
 mod fixtures;
+mod transfers;
+mod transfers_page;
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
@@ -29,6 +31,8 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("win.rename", &["F2"]);
         app.set_accels_for_action("win.move", &["<Control>m"]);
         app.set_accels_for_action("win.trash", &["Delete"]);
+        app.set_accels_for_action("win.upload", &["<Control>u"]);
+        app.set_accels_for_action("win.download", &["<Control>d"]);
     });
     app.connect_activate(browser::build_window);
     app.run()
