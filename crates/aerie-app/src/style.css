@@ -109,9 +109,51 @@ button {
   font-weight: 600;
 }
 
-.aerie-files .file-icon.folder {
-  color: var(--accent-color);
+/* File list: taller rows, a rounded inset selection, and a tinted tile per file type. */
+
+columnview.aerie-files > header {
+  margin: 0 6px;
 }
+
+columnview.aerie-files > listview > row {
+  min-height: 40px;
+  margin: 1px 6px;
+  border-radius: 8px;
+  transition: background-color 120ms ease-out;
+}
+
+columnview.aerie-files > listview > row:hover {
+  background-color: alpha(currentColor, 0.05);
+}
+
+columnview.aerie-files > listview > row:selected {
+  background-color: color-mix(in srgb, var(--accent-color) 18%, transparent);
+  color: var(--view-fg-color);
+}
+
+columnview.aerie-files > listview > row:selected:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 45%, transparent);
+}
+
+.numeric {
+  font-feature-settings: "tnum";
+}
+
+.file-icon {
+  padding: 5px;
+  border-radius: 7px;
+  color: var(--aerie-kind-color);
+  background-color: color-mix(in srgb, var(--aerie-kind-color) 14%, transparent);
+}
+
+/* Light palette: 600 shades keep the glyphs legible on Snow. */
+.file-icon.kind-folder { --aerie-kind-color: #0284c7; }
+.file-icon.kind-document { --aerie-kind-color: #2563eb; }
+.file-icon.kind-spreadsheet { --aerie-kind-color: #059669; }
+.file-icon.kind-presentation { --aerie-kind-color: #ea580c; }
+.file-icon.kind-pdf { --aerie-kind-color: #dc2626; }
+.file-icon.kind-image { --aerie-kind-color: #7c3aed; }
+.file-icon.kind-other { --aerie-kind-color: #64748b; }
 
 .aerie-files > header > button,
 .aerie-files > header > button label {
@@ -124,6 +166,54 @@ button {
   font-size: 12px;
   color: var(--aerie-secondary-fg-color);
 }
+
+/* Shared drives: a heading that folds the section, a count, and a turning chevron. */
+.drives-toggle {
+  margin: 8px 6px 0;
+  padding: 4px 12px;
+  border-radius: 8px;
+}
+.drives-toggle .sidebar-heading {
+  margin: 0;
+  font-weight: 600;
+}
+.drives-count {
+  font-size: 12px;
+  color: var(--aerie-secondary-fg-color);
+}
+.drives-toggle .chevron {
+  color: var(--aerie-secondary-fg-color);
+  transition: -gtk-icon-transform 180ms ease-out;
+}
+.drives-toggle.expanded .chevron {
+  -gtk-icon-transform: rotate(90deg);
+}
+
+.drive-pin {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+row:hover .drive-pin,
+.drive-pin:focus-visible {
+  opacity: 0.7;
+}
+.drive-pin.pinned {
+  opacity: 1;
+  color: var(--accent-color);
+}
+
+.drive-icon { color: var(--aerie-hue); }
+.drive-icon.hue-0 { --aerie-hue: #0284c7; }
+.drive-icon.hue-1 { --aerie-hue: #4f46e5; }
+.drive-icon.hue-2 { --aerie-hue: #7c3aed; }
+.drive-icon.hue-3 { --aerie-hue: #db2777; }
+.drive-icon.hue-4 { --aerie-hue: #ea580c; }
+.drive-icon.hue-5 { --aerie-hue: #ca8a04; }
+.drive-icon.hue-6 { --aerie-hue: #059669; }
+.drive-icon.hue-7 { --aerie-hue: #0891b2; }
 
 @keyframes aerie-spin {
   from { -gtk-icon-transform: rotate(0deg); }

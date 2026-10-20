@@ -28,3 +28,22 @@
   --popover-fg-color: #f8fafc;
   --border-color: alpha(#334155, 0.5);
 }
+
+/* File type tiles: 400 shades, softened, on Midnight. */
+.file-icon.kind-folder { --aerie-kind-color: #38bdf8; }
+.file-icon.kind-document { --aerie-kind-color: #60a5fa; }
+.file-icon.kind-spreadsheet { --aerie-kind-color: #34d399; }
+.file-icon.kind-presentation { --aerie-kind-color: #fb923c; }
+.file-icon.kind-pdf { --aerie-kind-color: #f87171; }
+.file-icon.kind-image { --aerie-kind-color: #a78bfa; }
+.file-icon.kind-other { --aerie-kind-color: #94a3b8; }
+
+/* Shared drive hues on Midnight. */
+.drive-icon.hue-0 { --aerie-hue: #38bdf8; }
+.drive-icon.hue-1 { --aerie-hue: #818cf8; }
+.drive-icon.hue-2 { --aerie-hue: #a78bfa; }
+.drive-icon.hue-3 { --aerie-hue: #f472b6; }
+.drive-icon.hue-4 { --aerie-hue: #fb923c; }
+.drive-icon.hue-5 { --aerie-hue: #facc15; }
+.drive-icon.hue-6 { --aerie-hue: #34d399; }
+.drive-icon.hue-7 { --aerie-hue: #22d3ee; }
