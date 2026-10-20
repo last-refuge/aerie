@@ -24,6 +24,10 @@ pub struct Settings {
     pub appearance: Appearance,
     /// The sidebar width the user dragged to, in pixels.
     pub sidebar_width: Option<f64>,
+    /// Shared drives pinned to the top of the sidebar, by ID.
+    pub pinned_drives: Vec<String>,
+    /// Whether the shared drives section is folded away.
+    pub drives_collapsed: bool,
 }
 
 fn config_dir() -> PathBuf {

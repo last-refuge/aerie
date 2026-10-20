@@ -531,7 +531,12 @@ struct Browser {
     crumb_mark: Cell<SyncMark>,
     /// The shared drive being browsed, or `None` for My Drive.
     tree: RefCell<Option<FileEntry>>,
-    drives_header: gtk::Label,
+    /// Folds the shared drives away; shows how many there are.
+    drives_header: gtk::Button,
+    drives_count: gtk::Label,
+    drives_revealer: gtk::Revealer,
+    /// Narrows a long list of drives by name.
+    drives_filter: gtk::SearchEntry,
     /// Shown under the heading until the first index has found the shared drives.
     drives_loading: gtk::Box,
     drives_list: gtk::ListBox,
@@ -578,16 +583,28 @@ impl Browser {
         );
         name.set_expand(true);
         view.append_column(&name);
-        view.append_column(&column(
+        let modified = column(
             "Modified",
-            text_factory(|entry| format_modified(entry.modified)),
+            text_factory(
+                Align::Start,
+                |entry| format_modified(entry.modified),
+                |entry| Some(format_full_date(entry.modified)),
+            ),
             by(|a, b| a.modified.cmp(&b.modified)),
-        ));
-        view.append_column(&column(
+        );
+        modified.set_fixed_width(150);
+        view.append_column(&modified);
+        let size = column(
             "Size",
-            text_factory(|entry| entry.size.map_or_else(|| "—".to_owned(), format_size)),
+            text_factory(
+                Align::End,
+                |entry| entry.size.map_or_else(|| "—".to_owned(), format_size),
+                |_| None,
+            ),
             by(|a, b| a.size.cmp(&b.size)),
-        ));
+        );
+        size.set_fixed_width(96);
+        view.append_column(&size);
         // Folders stay first whichever column or direction the user sorts by.
         let order = gtk::MultiSorter::new();
         order.append(gtk::CustomSorter::new(|a, b| {
@@ -631,10 +648,22 @@ impl Browser {
             active_root: RefCell::default(),
             crumb_mark: Cell::new(SyncMark::None),
             tree: RefCell::default(),
-            drives_header: gtk::Label::builder()
-                .label("Shared drives")
-                .xalign(0.0)
-                .css_classes(["heading", "sidebar-heading"])
+            drives_header: gtk::Button::builder()
+                .css_classes(["flat", "drives-toggle"])
+                .visible(false)
+                .build(),
+            drives_count: gtk::Label::builder()
+                .css_classes(["drives-count", "numeric"])
+                .build(),
+            drives_revealer: gtk::Revealer::builder()
+                .transition_type(gtk::RevealerTransitionType::SlideDown)
+                .transition_duration(180)
+                .build(),
+            drives_filter: gtk::SearchEntry::builder()
+                .placeholder_text("Filter drives")
+                .margin_start(12)
+                .margin_end(12)
+                .margin_bottom(4)
                 .visible(false)
                 .build(),
             drives_loading: {
@@ -1238,11 +1267,12 @@ impl Browser {
                 }
             }
         ));
+        self.install_drive_section();
         let lists = gtk::Box::new(gtk::Orientation::Vertical, 6);
         lists.append(places);
         lists.append(&self.drives_header);
         lists.append(&self.drives_loading);
-        lists.append(&self.drives_list);
+        lists.append(&self.drives_revealer);
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
@@ -1360,6 +1390,18 @@ impl Browser {
         self.drives_loading.set_visible(loading);
         self.drives_header
             .set_visible(loading || !drives.is_empty());
+        self.drives_count.set_label(&if drives.is_empty() {
+            String::new()
+        } else {
+            drives.len().to_string()
+        });
+        self.drives_filter
+            .set_visible(drives.len() > FILTER_DRIVES_ABOVE);
+        // Pinned drives come first, each group in name order.
+        let pinned = crate::preferences::Settings::load().pinned_drives;
+        let is_pinned = |drive: &FileEntry| pinned.iter().any(|id| id == drive.id.as_str());
+        let mut drives = drives;
+        drives.sort_by_key(|drive| !is_pinned(drive));
         if *self.drives.borrow() == drives {
             return;
         }
@@ -1368,7 +1410,7 @@ impl Browser {
         }
         for drive in &drives {
             self.drives_list
-                .append(&sidebar_row("aerie-hard-drive-symbolic", &drive.name));
+                .append(&self.drive_row(drive, is_pinned(drive)));
         }
         let open = self.tree.borrow().as_ref().map(|tree| tree.id.clone());
         if let Some(open) = open {
@@ -1381,6 +1423,129 @@ impl Browser {
             }
         }
         *self.drives.borrow_mut() = drives;
+    }
+
+    /// Wires the shared drives heading (fold and unfold), the filter and the list's order.
+    fn install_drive_section(self: &Rc<Self>) {
+        let heading = gtk::Box::builder().spacing(8).build();
+        heading.append(
+            &gtk::Label::builder()
+                .label("Shared drives")
+                .xalign(0.0)
+                .hexpand(true)
+                .css_classes(["sidebar-heading"])
+                .build(),
+        );
+        heading.append(&self.drives_count);
+        heading.append(
+            &gtk::Image::builder()
+                .icon_name("aerie-chevron-right-symbolic")
+                .pixel_size(14)
+                .css_classes(["chevron"])
+                .build(),
+        );
+        self.drives_header.set_child(Some(&heading));
+
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&self.drives_filter);
+        content.append(&self.drives_list);
+        self.drives_revealer.set_child(Some(&content));
+
+        let expanded = !crate::preferences::Settings::load().drives_collapsed;
+        self.set_drives_expanded(expanded);
+        self.drives_header.connect_clicked(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_| {
+                let expanded = !browser.drives_revealer.reveals_child();
+                browser.set_drives_expanded(expanded);
+                let mut settings = crate::preferences::Settings::load();
+                settings.drives_collapsed = !expanded;
+                settings.save();
+            }
+        ));
+
+        self.drives_list.set_filter_func(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            #[upgrade_or]
+            true,
+            move |row| {
+                let query = browser.drives_filter.text().to_lowercase();
+                query.is_empty()
+                    || browser
+                        .drives
+                        .borrow()
+                        .get(row.index() as usize)
+                        .is_some_and(|drive| drive.name.to_lowercase().contains(&query))
+            }
+        ));
+        self.drives_filter.connect_search_changed(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_| browser.drives_list.invalidate_filter()
+        ));
+    }
+
+    fn set_drives_expanded(&self, expanded: bool) {
+        self.drives_revealer.set_reveal_child(expanded);
+        if expanded {
+            self.drives_header.add_css_class("expanded");
+        } else {
+            self.drives_header.remove_css_class("expanded");
+        }
+        self.drives_header.set_tooltip_text(Some(if expanded {
+            "Hide shared drives"
+        } else {
+            "Show shared drives"
+        }));
+    }
+
+    /// A shared drive in the sidebar: its icon tinted a color of its own, its name, and a
+    /// pin that shows on hover, or always once pinned.
+    fn drive_row(self: &Rc<Self>, drive: &FileEntry, pinned: bool) -> gtk::ListBoxRow {
+        let row = gtk::Box::builder().spacing(12).build();
+        row.append(
+            &gtk::Image::builder()
+                .icon_name("aerie-hard-drive-symbolic")
+                .css_classes(["drive-icon", drive_hue(&drive.id)])
+                .build(),
+        );
+        row.append(
+            &gtk::Label::builder()
+                .label(&drive.name)
+                .xalign(0.0)
+                .hexpand(true)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .tooltip_text(&drive.name)
+                .build(),
+        );
+        let pin = gtk::Button::builder()
+            .icon_name("aerie-pin-symbolic")
+            .valign(gtk::Align::Center)
+            .css_classes(["flat", "circular", "drive-pin"])
+            .tooltip_text(if pinned { "Unpin" } else { "Pin to top" })
+            .build();
+        if pinned {
+            pin.add_css_class("pinned");
+        }
+        let id = drive.id.as_str().to_owned();
+        pin.connect_clicked(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_| {
+                let mut settings = crate::preferences::Settings::load();
+                if let Some(at) = settings.pinned_drives.iter().position(|p| *p == id) {
+                    settings.pinned_drives.remove(at);
+                } else {
+                    settings.pinned_drives.push(id.clone());
+                }
+                settings.save();
+                browser.refresh_drives();
+            }
+        ));
+        row.append(&pin);
+        gtk::ListBoxRow::builder().child(&row).build()
     }
 
     /// Opens My Drive (`None`) or a shared drive at its top.
@@ -1826,6 +1991,20 @@ fn samples() -> BrowseState<AppCatalog> {
     )
 }
 
+/// Above this many shared drives, the sidebar offers a filter.
+const FILTER_DRIVES_ABOVE: usize = 10;
+
+/// One of eight hues, the same for a drive every time, so drives are told apart at a glance.
+fn drive_hue(id: &DriveFileId) -> &'static str {
+    const HUES: [&str; 8] = [
+        "hue-0", "hue-1", "hue-2", "hue-3", "hue-4", "hue-5", "hue-6", "hue-7",
+    ];
+    let hash = id.as_str().bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    });
+    HUES[hash as usize % HUES.len()]
+}
+
 const SIDEBAR_WIDTHS: std::ops::RangeInclusive<f64> = 180.0..=480.0;
 
 /// Fixes the sidebar at `width`; the split view sizes it between its minimum and maximum.
@@ -1981,7 +2160,13 @@ fn name_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        row.append(&gtk::Image::builder().css_classes(["file-icon"]).build());
+        row.append(
+            &gtk::Image::builder()
+                .css_classes(["file-icon"])
+                .pixel_size(16)
+                .accessible_role(gtk::AccessibleRole::Presentation)
+                .build(),
+        );
         row.append(
             &gtk::Label::builder()
                 .xalign(0.0)
@@ -2017,11 +2202,7 @@ fn name_factory() -> gtk::SignalListItemFactory {
             .expect("badge");
         show_mark(&badge, row_data.mark);
         icon.set_icon_name(Some(icon_name(entry.kind)));
-        if entry.is_folder() {
-            icon.add_css_class("folder");
-        } else {
-            icon.remove_css_class("folder");
-        }
+        icon.set_css_classes(&["file-icon", kind_class(entry.kind)]);
         label.set_label(&entry.name);
         row.set_widget_name(&format!("{ENTRY_PREFIX}{}", entry.id.as_str()));
     });
@@ -2035,15 +2216,33 @@ fn drive_url(entry: &FileEntry) -> String {
     format!("https://drive.google.com/open?id={}", entry.id.as_str())
 }
 
-fn text_factory(text: impl Fn(&FileEntry) -> String + 'static) -> gtk::SignalListItemFactory {
+/// Where a metadata column sets its text: dates read from the left, sizes line up on
+/// the right.
+#[derive(Clone, Copy)]
+enum Align {
+    Start,
+    End,
+}
+
+fn text_factory(
+    align: Align,
+    text: impl Fn(&FileEntry) -> String + 'static,
+    tooltip: impl Fn(&FileEntry) -> Option<String> + 'static,
+) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
-    factory.connect_setup(|_, item| {
-        list_item(item).set_child(Some(
-            &gtk::Label::builder()
-                .xalign(0.0)
-                .css_classes(["metadata"])
-                .build(),
-        ));
+    factory.connect_setup(move |_, item| {
+        let label = gtk::Label::builder()
+            .css_classes(["metadata", "numeric"])
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        match align {
+            Align::Start => label.set_xalign(0.0),
+            Align::End => {
+                label.set_xalign(1.0);
+                label.set_margin_end(8);
+            }
+        }
+        list_item(item).set_child(Some(&label));
     });
     factory.connect_bind(move |_, item| {
         let item = list_item(item);
@@ -2051,6 +2250,7 @@ fn text_factory(text: impl Fn(&FileEntry) -> String + 'static) -> gtk::SignalLis
         let entry = entry_of(&object);
         let label = item.child().and_downcast::<gtk::Label>().expect("label");
         label.set_label(&text(&entry));
+        label.set_tooltip_text(tooltip(&entry).as_deref());
         label.set_widget_name(&format!("{ENTRY_PREFIX}{}", entry.id.as_str()));
     });
     factory
@@ -2064,7 +2264,7 @@ fn list_item(object: &glib::Object) -> &gtk::ListItem {
 
 fn icon_name(kind: FileKind) -> &'static str {
     match kind {
-        FileKind::Folder => "aerie-folder-symbolic",
+        FileKind::Folder => "aerie-folder-fill-symbolic",
         FileKind::Document | FileKind::Pdf => "aerie-file-text-symbolic",
         FileKind::Spreadsheet => "aerie-file-spreadsheet-symbolic",
         FileKind::Presentation => "aerie-presentation-symbolic",
@@ -2073,8 +2273,93 @@ fn icon_name(kind: FileKind) -> &'static str {
     }
 }
 
+/// The style class that colors a file's icon tile by its type.
+fn kind_class(kind: FileKind) -> &'static str {
+    match kind {
+        FileKind::Folder => "kind-folder",
+        FileKind::Document => "kind-document",
+        FileKind::Spreadsheet => "kind-spreadsheet",
+        FileKind::Presentation => "kind-presentation",
+        FileKind::Pdf => "kind-pdf",
+        FileKind::Image => "kind-image",
+        FileKind::Other => "kind-other",
+    }
+}
+
 fn format_modified(unix: i64) -> String {
+    match (
+        glib::DateTime::from_unix_local(unix),
+        glib::DateTime::now_local(),
+    ) {
+        (Ok(time), Ok(now)) => relative_date(&time, &now),
+        _ => "—".to_owned(),
+    }
+}
+
+/// How people say when something changed: minutes and hours today, then "Yesterday",
+/// weekdays within the week, and the date after that (with the year only when it differs).
+fn relative_date(time: &glib::DateTime, now: &glib::DateTime) -> String {
+    let seconds = now.difference(time).as_seconds();
+    let days_apart = |a: &glib::DateTime, b: &glib::DateTime| {
+        let day = |t: &glib::DateTime| {
+            glib::DateTime::from_local(t.year(), t.month(), t.day_of_month(), 0, 0, 0.0)
+                .map_or(0, |midnight| midnight.to_unix() / 86_400)
+        };
+        day(a) - day(b)
+    };
+    let format = |pattern: &str| {
+        time.format(pattern)
+            .map_or_else(|_| "—".to_owned(), String::from)
+    };
+    match seconds {
+        // A clock slightly ahead of Google's still reads sensibly.
+        ..60 => "Just now".to_owned(),
+        60..3_600 => match seconds / 60 {
+            1 => "1 minute ago".to_owned(),
+            minutes => format!("{minutes} minutes ago"),
+        },
+        _ => match days_apart(now, time) {
+            0 => match seconds / 3_600 {
+                1 => "1 hour ago".to_owned(),
+                hours => format!("{hours} hours ago"),
+            },
+            1 => "Yesterday".to_owned(),
+            2..7 => format("%A"),
+            _ if time.year() == now.year() => format("%b %-e"),
+            _ => format("%b %-e, %Y"),
+        },
+    }
+}
+
+/// The exact time, for tooltips.
+fn format_full_date(unix: i64) -> String {
     glib::DateTime::from_unix_local(unix)
-        .and_then(|time| time.format("%b %-e, %Y"))
-        .map_or_else(|_| "—".to_owned(), String::from)
+        .and_then(|time| time.format("%A, %B %-e, %Y at %-l:%M %p"))
+        .map_or_else(|_| String::new(), String::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(day: i32, hour: i32, minute: i32) -> glib::DateTime {
+        glib::DateTime::from_local(2026, 10, day, hour, minute, 0.0).unwrap()
+    }
+
+    #[test]
+    fn dates_read_relative_to_now() {
+        let now = at(20, 15, 0);
+        assert_eq!(relative_date(&now, &now), "Just now");
+        // A clock slightly behind Google's.
+        assert_eq!(relative_date(&at(20, 15, 1), &now), "Just now");
+        assert_eq!(relative_date(&at(20, 14, 59), &now), "1 minute ago");
+        assert_eq!(relative_date(&at(20, 14, 55), &now), "5 minutes ago");
+        assert_eq!(relative_date(&at(20, 14, 0), &now), "1 hour ago");
+        assert_eq!(relative_date(&at(20, 1, 0), &now), "14 hours ago");
+        assert_eq!(relative_date(&at(19, 23, 0), &now), "Yesterday");
+        assert_eq!(relative_date(&at(16, 9, 0), &now), "Friday");
+        assert_eq!(relative_date(&at(2, 9, 0), &now), "Oct 2");
+        let last_year = glib::DateTime::from_local(2025, 12, 31, 9, 0, 0.0).unwrap();
+        assert_eq!(relative_date(&last_year, &now), "Dec 31, 2025");
+    }
 }
