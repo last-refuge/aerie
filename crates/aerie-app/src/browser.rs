@@ -13,8 +13,9 @@ use aerie_store::Account;
 use gtk::{gio, glib};
 
 use crate::catalog::{AppCatalog, StoreCatalog};
-use crate::engine::{Command, Engine, Event};
+use crate::engine::{Command, Engine, Event, LocalFile};
 use crate::fixtures::{self, ROOT_ID};
+use crate::transfers_page::TransfersPage;
 
 pub fn build_window(app: &adw::Application) {
     if let Some(window) = app.active_window() {
@@ -34,7 +35,8 @@ pub fn build_window(app: &adw::Application) {
     let engine = Rc::new(Engine::start(events));
     let browser = Browser::new(engine.clone());
     let welcome = Welcome::new(engine.clone());
-    let split = browser.split_view();
+    let transfers = TransfersPage::new(engine.clone());
+    let split = browser.split_view(&transfers.root);
 
     let stack = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::Crossfade)
@@ -70,9 +72,25 @@ pub fn build_window(app: &adw::Application) {
         browser,
         #[strong]
         welcome,
+        #[strong]
+        transfers,
         async move {
             while let Ok(event) = inbox.recv().await {
-                handle_event(event, &window, &stack, &toasts, &browser, &welcome);
+                if matches!(
+                    event,
+                    Event::TransfersChanged | Event::SignedIn(_) | Event::SignedOut
+                ) {
+                    let list = browser.transfers();
+                    browser.set_transfer_count(TransfersPage::active_count(&list));
+                    transfers.show(list);
+                }
+                match event {
+                    Event::TransferProgress { id, done, total } => {
+                        transfers.progress(id, done, total)
+                    }
+                    Event::TransfersChanged => {}
+                    event => handle_event(event, &window, &stack, &toasts, &browser, &welcome),
+                }
             }
         }
     ));
@@ -150,6 +168,18 @@ fn install_actions(
         browser,
         move |_, _| browser.trash_selected()
     ));
+    let upload = gio::SimpleAction::new("upload", None);
+    upload.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.choose_uploads()
+    ));
+    let download = gio::SimpleAction::new("download", None);
+    download.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.download_selected()
+    ));
     let open_in_drive = gio::SimpleAction::new("open-in-drive", None);
     open_in_drive.connect_activate(glib::clone!(
         #[strong]
@@ -179,6 +209,8 @@ fn install_actions(
         &rename,
         &move_to,
         &trash,
+        &upload,
+        &download,
         &open_in_drive,
     ] {
         window.add_action(action);
@@ -247,6 +279,7 @@ fn handle_event(
         Event::CatalogChanged => browser.reload(),
         Event::Offline => browser.set_status(Status::Offline),
         Event::Problem(message) => toasts.add_toast(adw::Toast::new(&message)),
+        Event::TransfersChanged | Event::TransferProgress { .. } => {}
         Event::NeedsWriteAccess => {
             let _ = WidgetExt::activate_action(window, "win.allow-changes", None);
         }
@@ -383,6 +416,10 @@ enum Status {
 /// Widgets over a [`BrowseState`]. Navigation and search rebuild the visible list.
 struct Browser {
     engine: Rc<Engine>,
+    /// The content area: the file list, or the transfer list.
+    pages: gtk::Stack,
+    transfers_row: gtk::ListBoxRow,
+    transfers_badge: gtk::Label,
     selection: gtk::SingleSelection,
     state: RefCell<BrowseState<AppCatalog>>,
     account: RefCell<Option<Account>>,
@@ -455,8 +492,23 @@ impl Browser {
         content.add_named(&scroller, Some("list"));
         content.add_named(&empty, Some("empty"));
 
+        let transfers_badge = gtk::Label::builder()
+            .css_classes(["metadata"])
+            .hexpand(true)
+            .xalign(1.0)
+            .build();
+        let transfers_row = sidebar_row("folder-download-symbolic", "Transfers");
+        if let Some(row) = transfers_row.child().and_downcast::<gtk::Box>() {
+            row.append(&transfers_badge);
+        }
         let browser = Rc::new(Self {
             engine,
+            pages: gtk::Stack::builder()
+                .transition_type(gtk::StackTransitionType::Crossfade)
+                .transition_duration(120)
+                .build(),
+            transfers_row,
+            transfers_badge,
             selection: selection.clone(),
             state: RefCell::new(samples()),
             account: RefCell::default(),
@@ -548,6 +600,13 @@ impl Browser {
         set_action_enabled(&window, "move", can.move_item);
         set_action_enabled(&window, "trash", can.trash);
         set_action_enabled(&window, "open-in-drive", selected.is_some());
+        set_action_enabled(
+            &window,
+            "download",
+            selected
+                .as_ref()
+                .is_some_and(|entry| !entry.is_folder() && entry.can.download),
+        );
         let state = self.state.borrow();
         let folder_allows = state
             .catalog()
@@ -558,12 +617,18 @@ impl Browser {
             "new-folder",
             !state.is_searching() && folder_allows,
         );
+        set_action_enabled(
+            &window,
+            "upload",
+            drive && !state.is_searching() && folder_allows,
+        );
     }
 
     /// Right-click, or the Menu key, opens actions for the item under the pointer.
     fn install_context_menu(self: &Rc<Self>) {
         let menu = gio::Menu::new();
         menu.append(Some("Open in Google Drive"), Some("win.open-in-drive"));
+        menu.append(Some("Download…"), Some("win.download"));
         let edit = gio::Menu::new();
         edit.append(Some("Rename…"), Some("win.rename"));
         edit.append(Some("Move to…"), Some("win.move"));
@@ -653,6 +718,138 @@ impl Browser {
         });
     }
 
+    fn transfers(&self) -> Vec<aerie_store::Transfer> {
+        match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog.transfers(),
+            AppCatalog::Samples(_) => Vec::new(),
+        }
+    }
+
+    fn set_transfer_count(&self, active: usize) {
+        self.transfers_badge.set_label(&if active == 0 {
+            String::new()
+        } else {
+            active.to_string()
+        });
+    }
+
+    fn upload(&self, files: Vec<gio::File>) {
+        let parent = self.state.borrow().current_folder().clone();
+        let files: Vec<LocalFile> = files
+            .into_iter()
+            .filter_map(|file| file.path())
+            .map(|path| {
+                let (content_type, _) = gio::content_type_guess(Some(&path), None);
+                let mime_type = gio::content_type_get_mime_type(&content_type)
+                    .map_or_else(|| "application/octet-stream".to_owned(), String::from);
+                LocalFile { path, mime_type }
+            })
+            .collect();
+        if !files.is_empty() {
+            self.engine.send(Command::Upload { files, parent });
+        }
+    }
+
+    fn choose_uploads(self: &Rc<Self>) {
+        let dialog = gtk::FileDialog::builder()
+            .title("Upload to Google Drive")
+            .accept_label("Upload")
+            .modal(true)
+            .build();
+        dialog.open_multiple(
+            self.window().as_ref(),
+            gio::Cancellable::NONE,
+            glib::clone!(
+                #[weak(rename_to = browser)]
+                self,
+                move |result| {
+                    let Ok(files) = result else { return };
+                    let files = (0..files.n_items())
+                        .filter_map(|index| files.item(index).and_downcast::<gio::File>())
+                        .collect();
+                    browser.upload(files);
+                }
+            ),
+        );
+    }
+
+    /// Files dropped on the list upload into the open folder.
+    fn install_drop_target(self: &Rc<Self>, target: &impl IsA<gtk::Widget>) {
+        let drop = gtk::DropTarget::new(
+            gtk::gdk::FileList::static_type(),
+            gtk::gdk::DragAction::COPY,
+        );
+        drop.connect_drop(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            #[upgrade_or]
+            false,
+            move |_, value, _, _| {
+                let enabled = browser
+                    .window()
+                    .and_then(|window| window.lookup_action("upload"))
+                    .is_some_and(|action| action.is_enabled());
+                let Ok(list) = value.get::<gtk::gdk::FileList>() else {
+                    return false;
+                };
+                if !enabled {
+                    return false;
+                }
+                browser.upload(list.files());
+                true
+            }
+        ));
+        target.add_controller(drop);
+    }
+
+    fn download_selected(self: &Rc<Self>) {
+        let Some(entry) = self.selected() else { return };
+        if entry.is_google_native() {
+            let formats = crate::actions::export_formats(&entry.mime_type);
+            let browser = self.clone();
+            crate::actions::choose_export(&self.view, &entry.clone(), formats, move |format| {
+                browser.save_download(entry.clone(), Some(format));
+            });
+        } else {
+            self.save_download(entry, None);
+        }
+    }
+
+    fn save_download(
+        self: &Rc<Self>,
+        entry: FileEntry,
+        export: Option<crate::actions::ExportFormat>,
+    ) {
+        let name = match &export {
+            Some(format) => format!("{}.{}", entry.name, format.extension),
+            None => entry.name.clone(),
+        };
+        let dialog = gtk::FileDialog::builder()
+            .title("Download")
+            .initial_name(&name)
+            .accept_label("Download")
+            .modal(true)
+            .build();
+        if let Some(downloads) = glib::user_special_dir(glib::UserDirectory::Downloads) {
+            dialog.set_initial_folder(Some(&gio::File::for_path(downloads)));
+        }
+        let engine = self.engine.clone();
+        dialog.save(
+            self.window().as_ref(),
+            gio::Cancellable::NONE,
+            move |result| {
+                let Some(destination) = result.ok().and_then(|file| file.path()) else {
+                    return;
+                };
+                engine.send(Command::Download {
+                    entry,
+                    destination,
+                    export_mime: export.map(|format| format.mime_type.to_owned()),
+                });
+            },
+        );
+    }
+
     fn trash_selected(&self) {
         if let Some(entry) = self.selected() {
             self.engine.send(Command::Trash { id: entry.id });
@@ -665,7 +862,7 @@ impl Browser {
         }
     }
 
-    fn split_view(self: &Rc<Self>) -> adw::NavigationSplitView {
+    fn split_view(self: &Rc<Self>, transfers: &gtk::Widget) -> adw::NavigationSplitView {
         let content = adw::ToolbarView::new();
         let header = adw::HeaderBar::builder()
             .title_widget(
@@ -689,14 +886,29 @@ impl Browser {
         content.add_top_bar(&header);
         content.add_top_bar(&self.banner);
 
+        let upload = gtk::Button::builder()
+            .icon_name("document-send-symbolic")
+            .tooltip_text("Upload files (Ctrl+U)")
+            .action_name("win.upload")
+            .build();
+        upload
+            .bind_property("sensitive", &upload, "visible")
+            .sync_create()
+            .build();
+        header.pack_end(&upload);
+
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         body.append(&self.breadcrumbs);
         body.append(&self.content);
         content.set_content(Some(&body));
+        self.install_drop_target(&body);
+
+        self.pages.add_named(&content, Some("files"));
+        self.pages.add_named(transfers, Some("transfers"));
 
         adw::NavigationSplitView::builder()
             .sidebar(&adw::NavigationPage::new(&self.sidebar(), "Aerie"))
-            .content(&adw::NavigationPage::new(&content, "My Drive"))
+            .content(&adw::NavigationPage::new(&self.pages, "My Drive"))
             .min_sidebar_width(200.0)
             .max_sidebar_width(260.0)
             .build()
@@ -708,11 +920,20 @@ impl Browser {
             .vexpand(true)
             .build();
         places.append(&sidebar_row("folder-symbolic", "My Drive"));
+        places.append(&self.transfers_row);
+        self.transfers_row.set_visible(false);
         places.select_row(places.row_at_index(0).as_ref());
         places.connect_row_activated(glib::clone!(
             #[weak(rename_to = browser)]
             self,
-            move |_, _| browser.open_root()
+            move |_, row| {
+                if row.index() == 1 {
+                    browser.pages.set_visible_child_name("transfers");
+                } else {
+                    browser.pages.set_visible_child_name("files");
+                    browser.open_root();
+                }
+            }
         ));
 
         let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -762,6 +983,7 @@ impl Browser {
             .borrow_mut()
             .replace(root, AppCatalog::Drive(catalog));
         self.account.replace(Some(account.clone()));
+        self.transfers_row.set_visible(true);
         self.banner.set_revealed(false);
         self.set_status(if self.indexing.get() {
             Status::Indexing(0)
@@ -774,6 +996,8 @@ impl Browser {
     fn show_samples(self: &Rc<Self>) {
         self.state.replace(samples());
         self.account.replace(None);
+        self.transfers_row.set_visible(false);
+        self.pages.set_visible_child_name("files");
         self.indexing.set(false);
         self.set_status(Status::Samples);
         self.show_state();

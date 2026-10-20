@@ -226,3 +226,110 @@ pub fn ask_for_write_access(parent: &impl IsA<gtk::Widget>, allow: impl Fn() + '
     dialog.connect_response(Some("allow"), move |_, _| allow());
     dialog.present(Some(parent));
 }
+
+/// A format a Google-native document can be exported as.
+#[derive(Clone, Copy, Debug)]
+pub struct ExportFormat {
+    pub label: &'static str,
+    pub mime_type: &'static str,
+    pub extension: &'static str,
+}
+
+const fn format(
+    label: &'static str,
+    mime_type: &'static str,
+    extension: &'static str,
+) -> ExportFormat {
+    ExportFormat {
+        label,
+        mime_type,
+        extension,
+    }
+}
+
+const PDF: ExportFormat = format("PDF", "application/pdf", "pdf");
+
+/// Export choices for a Google-native type, most useful first.
+pub fn export_formats(mime_type: &str) -> Vec<ExportFormat> {
+    match mime_type {
+        "application/vnd.google-apps.document" => vec![
+            format(
+                "Word",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "docx",
+            ),
+            PDF,
+            format(
+                "OpenDocument",
+                "application/vnd.oasis.opendocument.text",
+                "odt",
+            ),
+            format("Plain Text", "text/plain", "txt"),
+        ],
+        "application/vnd.google-apps.spreadsheet" => vec![
+            format(
+                "Excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsx",
+            ),
+            PDF,
+            format(
+                "OpenDocument",
+                "application/vnd.oasis.opendocument.spreadsheet",
+                "ods",
+            ),
+            format("CSV (first sheet)", "text/csv", "csv"),
+        ],
+        "application/vnd.google-apps.presentation" => vec![
+            format(
+                "PowerPoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "pptx",
+            ),
+            PDF,
+            format(
+                "OpenDocument",
+                "application/vnd.oasis.opendocument.presentation",
+                "odp",
+            ),
+        ],
+        "application/vnd.google-apps.drawing" => {
+            vec![
+                PDF,
+                format("PNG", "image/png", "png"),
+                format("SVG", "image/svg+xml", "svg"),
+            ]
+        }
+        _ => vec![PDF],
+    }
+}
+
+/// Asks which format to export a Google-native document as. An export is a snapshot:
+/// edits to the downloaded copy don't flow back to the original.
+pub fn choose_export(
+    parent: &impl IsA<gtk::Widget>,
+    entry: &FileEntry,
+    formats: Vec<ExportFormat>,
+    done: impl Fn(ExportFormat) + 'static,
+) {
+    let dialog = adw::AlertDialog::builder()
+        .heading(format!("Download “{}” as", entry.name))
+        .body(
+            "Google documents download as a copy in another format. Changes to the copy \
+             don’t update the original in Drive.",
+        )
+        .close_response("cancel")
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    for (index, format) in formats.iter().enumerate() {
+        dialog.add_response(&index.to_string(), format.label);
+    }
+    dialog.set_default_response(Some("0"));
+    dialog.set_response_appearance("0", adw::ResponseAppearance::Suggested);
+    dialog.connect_response(None, move |_, response| {
+        if let Some(format) = response.parse::<usize>().ok().and_then(|i| formats.get(i)) {
+            done(*format);
+        }
+    });
+    dialog.present(Some(parent));
+}

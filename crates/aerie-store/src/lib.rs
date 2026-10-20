@@ -4,6 +4,7 @@
 //! treats a missing or partial inventory as deleted files.
 
 mod migrations;
+mod transfers;
 
 use std::path::{Path, PathBuf};
 
@@ -20,6 +21,8 @@ pub enum Error {
     #[error("the database was written by a newer Aerie (schema {found}, this build knows {known})")]
     NewerSchema { found: i64, known: i64 },
 }
+
+pub use transfers::{Direction, NewTransfer, Transfer, TransferState};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -64,6 +67,8 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // The engine, transfers and the UI each hold a connection; wait out brief locks.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrations::run(&mut conn)?;
         Ok(Self { conn })
     }

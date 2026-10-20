@@ -32,6 +32,25 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE files ADD COLUMN mime_type TEXT NOT NULL DEFAULT '';
     ALTER TABLE files ADD COLUMN capabilities INTEGER NOT NULL DEFAULT 0;
     UPDATE accounts SET inventory_complete = 0;",
+    // 3: the transfer queue, which survives restarts.
+    "CREATE TABLE transfers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+        direction TEXT NOT NULL,
+        file_id TEXT,
+        parent_id TEXT,
+        name TEXT NOT NULL,
+        local_path TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        export_mime TEXT,
+        total INTEGER,
+        transferred INTEGER NOT NULL DEFAULT 0,
+        state TEXT NOT NULL,
+        upload_session TEXT,
+        replaces_mtime INTEGER,
+        error TEXT,
+        created INTEGER NOT NULL
+    );",
 ];
 
 pub fn run(conn: &mut Connection) -> Result<()> {

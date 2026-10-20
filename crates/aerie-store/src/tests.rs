@@ -51,9 +51,9 @@ fn migrates_to_the_latest_schema_once() {
     let dir = std::env::temp_dir().join(format!("aerie-store-{}", std::process::id()));
     let path = dir.join("nested/aerie.sqlite3");
     let first = Store::open(&path).unwrap();
-    assert_eq!(first.schema_version().unwrap(), 2);
+    assert_eq!(first.schema_version().unwrap(), 3);
     drop(first);
-    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 2);
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 3);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

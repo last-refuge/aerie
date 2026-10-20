@@ -7,6 +7,7 @@ pub mod api;
 pub mod auth;
 pub mod client;
 pub mod credentials;
+pub mod download;
 pub mod upload;
 
 use thiserror::Error;
