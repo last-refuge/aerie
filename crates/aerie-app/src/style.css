@@ -145,3 +145,11 @@ button {
   background-color: color-mix(in srgb, var(--accent-color) 6%, transparent);
   border-radius: 8px;
 }
+
+/* The sidebar's resize strip: invisible until hovered or dragged. */
+.sidebar-resize {
+  transition: box-shadow 150ms ease-out;
+}
+.sidebar-resize:hover {
+  box-shadow: inset -2px 0 var(--accent-color);
+}

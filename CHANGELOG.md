@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.7 beta
+
+- **Resizable sidebar:** drag the sidebar's edge to make it wider or narrower; Aerie remembers the width. Double-click the edge to restore the default.
+
 ## 0.3.6 beta
 
 - **Drops from file managers:** the file list accepts files whether the file manager offers to copy, move or link them, and always uploads a copy. Drops are logged so any that still fail can be diagnosed.

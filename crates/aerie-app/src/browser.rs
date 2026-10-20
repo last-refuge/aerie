@@ -1177,12 +1177,18 @@ impl Browser {
         self.pages.add_named(transfers, Some("transfers"));
         self.pages.add_named(sync, Some("sync"));
 
-        adw::NavigationSplitView::builder()
-            .sidebar(&adw::NavigationPage::new(&self.sidebar(), "Aerie"))
+        let sidebar = gtk::Overlay::builder().child(&self.sidebar()).build();
+        let split = adw::NavigationSplitView::builder()
+            .sidebar(&adw::NavigationPage::new(&sidebar, "Aerie"))
             .content(&adw::NavigationPage::new(&self.pages, "My Drive"))
             .min_sidebar_width(200.0)
             .max_sidebar_width(260.0)
-            .build()
+            .build();
+        if let Some(width) = crate::preferences::Settings::load().sidebar_width {
+            set_sidebar_width(&split, width);
+        }
+        sidebar.add_overlay(&resize_handle(&split, &sidebar));
+        split
     }
 
     fn sidebar(self: &Rc<Self>) -> gtk::Widget {
@@ -1818,6 +1824,76 @@ fn samples() -> BrowseState<AppCatalog> {
         DriveFileId::new(ROOT_ID),
         AppCatalog::Samples(MemoryCatalog::new(fixtures::sample_entries())),
     )
+}
+
+const SIDEBAR_WIDTHS: std::ops::RangeInclusive<f64> = 180.0..=480.0;
+
+/// Fixes the sidebar at `width`; the split view sizes it between its minimum and maximum.
+fn set_sidebar_width(split: &adw::NavigationSplitView, width: f64) {
+    let width = width.clamp(*SIDEBAR_WIDTHS.start(), *SIDEBAR_WIDTHS.end());
+    // Widths are measured in pixels, which the default unit isn't under text scaling.
+    split.set_sidebar_width_unit(adw::LengthUnit::Px);
+    split.set_min_sidebar_width(width);
+    split.set_max_sidebar_width(width);
+}
+
+/// A thin strip on the sidebar's edge that drags its width, which is remembered.
+/// Double-clicking it restores the default.
+fn resize_handle(split: &adw::NavigationSplitView, sidebar: &gtk::Overlay) -> gtk::Widget {
+    let handle = gtk::Box::builder()
+        .width_request(8)
+        .halign(gtk::Align::End)
+        .css_classes(["sidebar-resize"])
+        .cursor(&gtk::gdk::Cursor::from_name("col-resize", None).expect("a standard cursor"))
+        .tooltip_text("Drag to resize")
+        .build();
+    let drag = gtk::GestureDrag::new();
+    let start = std::rc::Rc::new(std::cell::Cell::new(0.0));
+    drag.connect_drag_begin(glib::clone!(
+        #[weak]
+        sidebar,
+        #[strong]
+        start,
+        move |_, _, _| {
+            tracing::debug!(width = sidebar.width(), "resizing the sidebar");
+            start.set(f64::from(sidebar.width()));
+        }
+    ));
+    drag.connect_drag_update(glib::clone!(
+        #[weak]
+        split,
+        #[strong]
+        start,
+        move |_, dx, _| set_sidebar_width(&split, start.get() + dx)
+    ));
+    drag.connect_drag_end(glib::clone!(
+        #[weak]
+        split,
+        move |_, _, _| {
+            let mut settings = crate::preferences::Settings::load();
+            settings.sidebar_width = Some(split.min_sidebar_width());
+            settings.save();
+        }
+    ));
+    handle.add_controller(drag);
+
+    let reset = gtk::GestureClick::new();
+    reset.connect_pressed(glib::clone!(
+        #[weak]
+        split,
+        move |_, presses, _, _| {
+            if presses == 2 {
+                split.set_sidebar_width_unit(adw::LengthUnit::Sp);
+                split.set_min_sidebar_width(200.0);
+                split.set_max_sidebar_width(260.0);
+                let mut settings = crate::preferences::Settings::load();
+                settings.sidebar_width = None;
+                settings.save();
+            }
+        }
+    ));
+    handle.add_controller(reset);
+    handle.upcast()
 }
 
 fn sidebar_row(icon: &str, label: &str) -> gtk::ListBoxRow {
