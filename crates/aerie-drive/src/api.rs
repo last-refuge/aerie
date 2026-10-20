@@ -32,6 +32,57 @@ pub struct RemoteVersion {
     pub modified_time: Option<String>,
 }
 
+/// One stored revision of a file's content.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Revision {
+    pub id: String,
+    pub md5_checksum: Option<String>,
+    pub modified_time: Option<String>,
+}
+
+impl RemoteVersion {
+    /// Whether the content differs from `baseline`. Metadata-only edits don't count.
+    pub fn content_changed_since(&self, baseline: &RemoteVersion) -> bool {
+        match (&self.md5_checksum, &baseline.md5_checksum) {
+            (Some(now), Some(then)) => now != then,
+            _ => self.head_revision_id != baseline.head_revision_id,
+        }
+    }
+}
+
+/// Revisions written by someone else between `baseline` and Aerie's own `ours`. Drive has
+/// no conditional writes, so a non-empty result means Aerie overwrote a concurrent edit,
+/// which can still be recovered from the returned revisions.
+///
+/// If the baseline revision has been pruned, every revision before `ours` modified after
+/// the baseline time is treated as intervening, erring towards a conflict copy.
+pub fn intervening_revisions(
+    revisions: &[Revision],
+    baseline: &RemoteVersion,
+    ours: &str,
+) -> Vec<Revision> {
+    let Some(end) = revisions.iter().position(|r| r.id == ours) else {
+        return Vec::new();
+    };
+    let before_ours = &revisions[..end];
+    match baseline
+        .head_revision_id
+        .as_deref()
+        .and_then(|head| before_ours.iter().position(|r| r.id == head))
+    {
+        Some(start) => before_ours[start + 1..].to_vec(),
+        None => before_ours
+            .iter()
+            .filter(|r| match (&r.modified_time, &baseline.modified_time) {
+                (Some(revision), Some(base)) => unix_seconds(revision) > unix_seconds(base),
+                _ => true,
+            })
+            .cloned()
+            .collect(),
+    }
+}
+
 /// One page of the change log.
 #[derive(Debug)]
 pub struct ChangePage {
@@ -194,6 +245,44 @@ impl DriveApi {
             &[("fields", "version,md5Checksum,headRevisionId,modifiedTime")],
         )
         .await
+    }
+
+    /// The file's stored revisions, oldest first.
+    pub async fn revisions(&self, id: &DriveFileId) -> Result<Vec<Revision>> {
+        #[derive(Deserialize)]
+        struct Page {
+            #[serde(default)]
+            revisions: Vec<Revision>,
+        }
+        let page: Page = self
+            .get(
+                &format!("files/{}/revisions", id.as_str()),
+                &[
+                    ("fields", "revisions(id,md5Checksum,modifiedTime)"),
+                    ("pageSize", "1000"),
+                ],
+            )
+            .await?;
+        Ok(page.revisions)
+    }
+
+    /// Downloads the content of one stored revision.
+    pub async fn download_revision(&self, id: &DriveFileId, revision: &str) -> Result<Vec<u8>> {
+        let response = self
+            .http
+            .get(format!(
+                "{}/files/{}/revisions/{revision}",
+                self.api_base,
+                id.as_str()
+            ))
+            .bearer_auth(&self.access_token)
+            .query(&[("alt", "media")])
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(api_error(response).await);
+        }
+        Ok(response.bytes().await?.to_vec())
     }
 
     /// The My Drive root's real ID. Listings report it as the parent, not `"root"`.
@@ -446,6 +535,67 @@ mod tests {
         assert_eq!(deleted, Some(Change::Removed(DriveFileId::new("1a"))));
 
         assert_eq!(change(r#"{"changeType":"drive","removed":false}"#), None);
+    }
+
+    fn revision(id: &str, time: &str) -> Revision {
+        Revision {
+            id: id.into(),
+            md5_checksum: None,
+            modified_time: Some(time.into()),
+        }
+    }
+
+    fn baseline(head: &str, time: &str) -> RemoteVersion {
+        RemoteVersion {
+            version: "1".into(),
+            md5_checksum: None,
+            head_revision_id: Some(head.into()),
+            modified_time: Some(time.into()),
+        }
+    }
+
+    #[test]
+    fn finds_revisions_written_between_baseline_and_ours() {
+        let revisions = [
+            revision("a", "2026-10-20T00:00:00Z"),
+            revision("b", "2026-10-20T00:01:00Z"),
+            revision("c", "2026-10-20T00:02:00Z"),
+        ];
+        let base = baseline("a", "2026-10-20T00:00:00Z");
+        assert_eq!(
+            intervening_revisions(&revisions, &base, "c"),
+            [revisions[1].clone()]
+        );
+        assert!(intervening_revisions(&revisions[..1], &base, "a").is_empty());
+        assert!(
+            intervening_revisions(&[revisions[0].clone(), revisions[2].clone()], &base, "c")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn falls_back_to_time_when_the_baseline_was_pruned() {
+        let revisions = [
+            revision("b", "2026-10-20T00:01:00Z"),
+            revision("c", "2026-10-20T00:02:00Z"),
+        ];
+        let base = baseline("gone", "2026-10-20T00:00:30Z");
+        assert_eq!(
+            intervening_revisions(&revisions, &base, "c"),
+            [revisions[0].clone()]
+        );
+    }
+
+    #[test]
+    fn compares_content_not_metadata() {
+        let mut then = baseline("a", "2026-10-20T00:00:00Z");
+        then.md5_checksum = Some("x".into());
+        let mut now = then.clone();
+        now.version = "5".into();
+        now.head_revision_id = Some("b".into());
+        assert!(!now.content_changed_since(&then));
+        now.md5_checksum = Some("y".into());
+        assert!(now.content_changed_since(&then));
     }
 
     #[test]
