@@ -3,7 +3,7 @@
 //!
 //! cargo run -p aerie-drive --example drive_spike [-- --watch | --sign-out]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use aerie_core::{Catalog, Change, FileKind, MemoryCatalog, format_size};
 use aerie_drive::api::{ChangeCursor, DriveApi};
@@ -85,7 +85,8 @@ async fn main() -> Result<(), Error> {
             () = tokio::time::sleep(delay) => {}
         }
 
-        if expires_at.is_some_and(|at| at <= Instant::now() + Duration::from_secs(60)) {
+        if expires_at.is_some_and(|at| at <= std::time::SystemTime::now() + Duration::from_secs(60))
+        {
             let Some(refresh_token) = &refresh_token else {
                 return Err("the sign-in expired and can't be refreshed".into());
             };

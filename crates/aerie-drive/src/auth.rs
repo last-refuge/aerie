@@ -1,6 +1,6 @@
 //! Installed-app sign-in: system browser, loopback redirect, PKCE S256 and a checked `state`.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use oauth2::basic::BasicClient;
 use oauth2::{
@@ -41,7 +41,8 @@ pub struct Tokens {
     pub access_token: String,
     /// Present after sign-in; Google omits it on refresh.
     pub refresh_token: Option<String>,
-    pub expires_at: Option<Instant>,
+    /// Wall-clock time, which keeps counting while the computer sleeps.
+    pub expires_at: Option<SystemTime>,
     pub scopes: Vec<String>,
 }
 
@@ -128,7 +129,7 @@ fn tokens_from(response: &impl TokenResponse) -> Tokens {
     Tokens {
         access_token: response.access_token().secret().clone(),
         refresh_token: response.refresh_token().map(|token| token.secret().clone()),
-        expires_at: response.expires_in().map(|ttl| Instant::now() + ttl),
+        expires_at: response.expires_in().map(|ttl| SystemTime::now() + ttl),
         scopes: response
             .scopes()
             .map(|scopes| scopes.iter().map(|s| s.to_string()).collect())

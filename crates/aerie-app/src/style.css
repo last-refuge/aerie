@@ -138,3 +138,10 @@ button {
 .sync-badge.syncing {
   animation: aerie-spin 1.6s linear infinite;
 }
+
+/* Files dragged over the file list: outline where they'll land. */
+.drop-zone:drop(active) {
+  box-shadow: inset 0 0 0 2px var(--accent-color);
+  background-color: color-mix(in srgb, var(--accent-color) 6%, transparent);
+  border-radius: 8px;
+}
