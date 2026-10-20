@@ -22,6 +22,14 @@ pub struct Account {
     pub email_address: String,
 }
 
+/// How much of the account's storage is used, in bytes. `limit` is absent for accounts
+/// without one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Storage {
+    pub used: u64,
+    pub limit: Option<u64>,
+}
+
 const FOLDER_MIME: &str = "application/vnd.google-apps.folder";
 
 /// Remote identity of a file's content. `version` increases on every change to the file,
@@ -234,6 +242,29 @@ impl DriveApi {
             )
             .await?;
         Ok(about.user)
+    }
+
+    /// The account's storage use across Drive, Gmail and Photos.
+    pub async fn storage(&self) -> Result<Storage> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct About {
+            storage_quota: Quota,
+        }
+        // Int64 values arrive as strings.
+        #[derive(Deserialize)]
+        struct Quota {
+            usage: Option<String>,
+            limit: Option<String>,
+        }
+        let about: About = self
+            .get("about", &[("fields", "storageQuota(usage,limit)")])
+            .await?;
+        let number = |value: Option<String>| value.and_then(|value| value.parse().ok());
+        Ok(Storage {
+            used: number(about.storage_quota.usage).unwrap_or(0),
+            limit: number(about.storage_quota.limit),
+        })
     }
 
     /// Lists a folder's untrashed children, following every page. `"root"` is My Drive.

@@ -128,6 +128,39 @@ button {
   padding: 12px;
 }
 
+.status-title {
+  font-weight: 600;
+}
+
+/* The status icon sits in a round, tinted badge whose color says how things stand. */
+.status-badge {
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 999px;
+  color: var(--aerie-tone);
+  background-color: color-mix(in srgb, var(--aerie-tone) 20%, transparent);
+}
+.status-badge.good { --aerie-tone: #16a34a; }
+.status-badge.working { --aerie-tone: var(--accent-color); }
+.status-badge.warning { --aerie-tone: #d97706; }
+.status-badge.off { --aerie-tone: var(--aerie-secondary-fg-color); }
+
+/* Storage use: a slim bar in the signature gradient, amber when nearly full. */
+.storage-bar trough {
+  min-height: 6px;
+  border-radius: 999px;
+  background-color: alpha(currentColor, 0.1);
+}
+.storage-bar progress {
+  min-height: 6px;
+  border-radius: 999px;
+  background-image: var(--aerie-primary-gradient);
+}
+.storage-bar.nearly-full progress {
+  background-image: none;
+  background-color: #d97706;
+}
+
 .breadcrumbs {
   padding: 8px 12px;
 }

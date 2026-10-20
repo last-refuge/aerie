@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.4.0" date="2026-10-20">
+      <description>
+        <p>A design pass: the luminous Aerie mark, a refreshed welcome screen, a richer file list, foldable and pinnable shared drives, and a sync and storage panel.</p>
+      </description>
+    </release>
     <release version="0.3.7" date="2026-10-20">
       <description>
         <p>Drag the sidebar's edge to resize it.</p>

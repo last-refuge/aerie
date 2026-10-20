@@ -34,6 +34,8 @@ fn scopes() -> (&'static str, &'static str) {
 const FASTEST_POLL: Duration = Duration::from_secs(10);
 const SLOWEST_POLL: Duration = Duration::from_secs(120);
 const OFFLINE_RETRY: Duration = Duration::from_secs(30);
+/// How often storage use is refreshed.
+const STORAGE_EVERY: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Command {
@@ -134,6 +136,11 @@ pub enum Event {
     },
     /// The cache reflects Drive as of the last successful check.
     UpToDate,
+    /// The account's storage use, in bytes; `limit` is absent when there is none.
+    Storage {
+        used: u64,
+        limit: Option<u64>,
+    },
     /// New metadata is in the store; redraw.
     CatalogChanged,
     Offline,
@@ -238,6 +245,8 @@ struct Worker {
     offline: bool,
     /// Commands that arrived during a long inventory, handled once it finishes.
     pending: Vec<Command>,
+    /// When storage use was last asked for; it's refreshed now and then, not every check.
+    storage_checked: Option<Instant>,
 }
 
 /// A point in an unfinished inventory, saved after every page so that a failure or a
@@ -285,6 +294,7 @@ impl Worker {
             poll_delay: FASTEST_POLL,
             offline: false,
             pending: Vec::new(),
+            storage_checked: None,
         }
     }
 
@@ -591,6 +601,7 @@ impl Worker {
     }
 
     async fn sign_out(&mut self) {
+        self.storage_checked = None;
         if let Some(task) = self.sync.take() {
             task.abort();
         }
@@ -627,6 +638,7 @@ impl Worker {
                 };
                 self.emit(Event::UpToDate);
                 self.sync_due = true;
+                self.refresh_storage().await;
             }
             Err(err) if err.is_offline() => {
                 tracing::info!("offline");
@@ -657,6 +669,29 @@ impl Worker {
                 tracing::warn!(%err, "check failed");
                 self.emit(Event::Problem(err.to_string()));
             }
+        }
+    }
+
+    /// Reports storage use, at most every [`STORAGE_EVERY`].
+    async fn refresh_storage(&mut self) {
+        if self
+            .storage_checked
+            .is_some_and(|at| at.elapsed() < STORAGE_EVERY)
+        {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        match session.drive.storage().await {
+            Ok(storage) => {
+                self.storage_checked = Some(Instant::now());
+                self.emit(Event::Storage {
+                    used: storage.used,
+                    limit: storage.limit,
+                });
+            }
+            Err(err) => tracing::info!(%err, "couldn't read storage use"),
         }
     }
 

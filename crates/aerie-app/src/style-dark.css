@@ -54,3 +54,7 @@
     radial-gradient(ellipse 900px 260px at 50% 110%, alpha(#8b5cf6, 0.20), transparent),
     linear-gradient(to top, alpha(#0e7490, 0.10), transparent 40%);
 }
+
+.status-badge.good { --aerie-tone: #4ade80; }
+.status-badge.warning { --aerie-tone: #fbbf24; }
+.storage-bar.nearly-full progress { background-color: #fbbf24; }
