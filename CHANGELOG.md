@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 beta
+
+- **Indexing choice:** Preferences › Shared drives can turn off "Index all shared drives" (on by default) and keep only chosen drives indexed. Other drives load folder by folder when opened, and search asks Google for them when online. Each indexed drive gets its own change feed, so unindexed drives cost nothing in the background. Drives holding a synced folder always stay indexed.
+
 ## 0.2.0 beta
 
 - **The Aerie look:** the cloud mark on the welcome screen and in the sidebar, Lucide icons throughout, and Inter and JetBrains Mono bundled with the app.

@@ -13,6 +13,7 @@ fn entry(id: &str, parent: &str, name: &str, kind: FileKind, modified: i64) -> F
         mime_type: "application/pdf".into(),
         md5: None,
         head_revision: None,
+        drive: None,
         can: aerie_core::Capabilities {
             rename: true,
             ..Default::default()
@@ -53,9 +54,9 @@ fn migrates_to_the_latest_schema_once() {
     let dir = std::env::temp_dir().join(format!("aerie-store-{}", std::process::id()));
     let path = dir.join("nested/aerie.sqlite3");
     let first = Store::open(&path).unwrap();
-    assert_eq!(first.schema_version().unwrap(), 5);
+    assert_eq!(first.schema_version().unwrap(), 6);
     drop(first);
-    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 5);
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 6);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -265,4 +266,58 @@ fn searches_100k_entries_quickly() {
     let p95 = timings[timings.len() * 95 / 100];
     println!("search p95 over 100k entries: {p95:?}");
     assert!(p95 < std::time::Duration::from_millis(150));
+}
+
+#[test]
+fn keeps_indexing_choices_and_drive_cursors() {
+    let mut store = store();
+    assert_eq!(
+        store.indexing(ACCOUNT).unwrap(),
+        Indexing {
+            all: true,
+            drives: vec![]
+        }
+    );
+    let choice = Indexing {
+        all: false,
+        drives: vec![DriveFileId::new("d1")],
+    };
+    store.set_indexing(ACCOUNT, &choice).unwrap();
+    assert_eq!(store.indexing(ACCOUNT).unwrap(), choice);
+
+    let mut item = entry("f", "d1", "In drive", FileKind::Pdf, 1);
+    item.drive = Some(DriveFileId::new("d1"));
+    store
+        .apply_drive_changes(
+            ACCOUNT,
+            &DriveFileId::new("d1"),
+            &[Change::Upsert(item)],
+            "c1",
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .drive_cursor(ACCOUNT, &DriveFileId::new("d1"))
+            .unwrap()
+            .as_deref(),
+        Some("c1")
+    );
+    assert_eq!(
+        store
+            .file(ACCOUNT, &DriveFileId::new("f"))
+            .unwrap()
+            .unwrap()
+            .drive,
+        Some(DriveFileId::new("d1"))
+    );
+    // A fresh inventory restarts every drive feed.
+    store
+        .begin_inventory(ACCOUNT, &DriveFileId::new("root"), "c")
+        .unwrap();
+    assert_eq!(
+        store
+            .drive_cursor(ACCOUNT, &DriveFileId::new("d1"))
+            .unwrap(),
+        None
+    );
 }

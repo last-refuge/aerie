@@ -36,6 +36,8 @@ pub struct FileEntry {
     pub md5: Option<String>,
     /// Drive's current revision of the content.
     pub head_revision: Option<String>,
+    /// The shared drive the item lives in; `None` for My Drive and items shared with you.
+    pub drive: Option<DriveFileId>,
 }
 
 /// Per-item permissions reported by Drive. Actions are offered only when allowed.

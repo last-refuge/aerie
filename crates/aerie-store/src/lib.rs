@@ -36,6 +36,14 @@ pub struct Account {
     pub display_name: String,
 }
 
+/// Which shared drives Aerie keeps indexed. With `all` off, only `drives` (and folders
+/// chosen for sync) are indexed; the rest load folder by folder when opened.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Indexing {
+    pub all: bool,
+    pub drives: Vec<DriveFileId>,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -133,6 +141,7 @@ impl Store {
             "UPDATE files SET inventoried = 0 WHERE account_id = ?1",
             [account],
         )?;
+        tx.execute("DELETE FROM drive_cursors WHERE account_id = ?1", [account])?;
         tx.commit()?;
         Ok(())
     }
@@ -270,18 +279,102 @@ impl Store {
 
     pub fn children(&self, account: &str, folder: &DriveFileId) -> Result<Vec<FileEntry>> {
         let mut statement = self.conn.prepare_cached(
-            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision FROM files
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision, drive_id FROM files
              WHERE account_id = ?1 AND parent_id = ?2",
         )?;
         let rows = statement.query_map(params![account, folder.as_str()], entry_from_row)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Whether every shared drive is indexed, or only the chosen ones.
+    pub fn indexing(&self, account: &str) -> Result<Indexing> {
+        let all: bool = self
+            .conn
+            .query_row(
+                "SELECT index_all_drives FROM accounts WHERE id = ?1",
+                [account],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(true);
+        let mut statement = self
+            .conn
+            .prepare_cached("SELECT drive_id FROM indexed_drives WHERE account_id = ?1")?;
+        let drives = statement
+            .query_map([account], |row| {
+                Ok(DriveFileId::new(row.get::<_, String>(0)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(Indexing { all, drives })
+    }
+
+    /// Changes what's indexed, and starts a fresh inventory to match.
+    pub fn set_indexing(&mut self, account: &str, indexing: &Indexing) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "UPDATE accounts SET index_all_drives = ?2, inventory_complete = 0 WHERE id = ?1",
+            params![account, indexing.all],
+        )?;
+        tx.execute(
+            "DELETE FROM indexed_drives WHERE account_id = ?1",
+            [account],
+        )?;
+        for drive in &indexing.drives {
+            tx.execute(
+                "INSERT INTO indexed_drives (account_id, drive_id) VALUES (?1, ?2)",
+                params![account, drive.as_str()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The change cursor for one shared drive's own feed.
+    pub fn drive_cursor(&self, account: &str, drive: &DriveFileId) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT cursor FROM drive_cursors WHERE account_id = ?1 AND drive_id = ?2",
+                params![account, drive.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Applies one page of a shared drive's own change feed with its cursor, atomically.
+    pub fn apply_drive_changes(
+        &mut self,
+        account: &str,
+        drive: &DriveFileId,
+        changes: &[Change],
+        cursor: &str,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        for change in changes {
+            match change {
+                Change::Upsert(entry) => upsert(&tx, account, entry)?,
+                Change::Removed(id) => {
+                    tx.execute(
+                        "DELETE FROM files WHERE account_id = ?1 AND id = ?2",
+                        params![account, id.as_str()],
+                    )?;
+                }
+            }
+        }
+        tx.execute(
+            "INSERT INTO drive_cursors (account_id, drive_id, cursor) VALUES (?1, ?2, ?3)
+             ON CONFLICT (account_id, drive_id) DO UPDATE SET cursor = ?3",
+            params![account, drive.as_str(), cursor],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Shared drives: the folders Aerie stores at the top of each drive's tree.
     pub fn shared_drives(&self, account: &str) -> Result<Vec<FileEntry>> {
         let mut statement = self.conn.prepare_cached(
             "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5,
-                    head_revision
+                    head_revision, drive_id
              FROM files
              WHERE account_id = ?1 AND mime_type = 'application/vnd.aerie.shared-drive'
              ORDER BY name COLLATE NOCASE",
@@ -294,7 +387,7 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision FROM files
+                "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision, drive_id FROM files
                  WHERE account_id = ?1 AND id = ?2",
                 params![account, id.as_str()],
                 entry_from_row,
@@ -313,7 +406,7 @@ impl Store {
                 .replace('_', "\\_")
         );
         let mut statement = self.conn.prepare_cached(
-            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision FROM files
+            "SELECT id, parent_id, name, kind, size, modified, mime_type, capabilities, md5, head_revision, drive_id FROM files
              WHERE account_id = ?1 AND name LIKE ?2 ESCAPE '\\'
              ORDER BY modified DESC LIMIT ?3",
         )?;
@@ -325,11 +418,11 @@ impl Store {
 fn upsert(conn: &Connection, account: &str, entry: &FileEntry) -> Result<()> {
     conn.execute(
         "INSERT INTO files (account_id, id, parent_id, name, kind, size, modified, mime_type,
-                            capabilities, md5, head_revision, inventoried)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1)
+                            capabilities, md5, head_revision, drive_id, inventoried)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1)
          ON CONFLICT (account_id, id) DO UPDATE SET
            parent_id = ?3, name = ?4, kind = ?5, size = ?6, modified = ?7, mime_type = ?8,
-           capabilities = ?9, md5 = ?10, head_revision = ?11, inventoried = 1",
+           capabilities = ?9, md5 = ?10, head_revision = ?11, drive_id = ?12, inventoried = 1",
         params![
             account,
             entry.id.as_str(),
@@ -342,6 +435,7 @@ fn upsert(conn: &Connection, account: &str, entry: &FileEntry) -> Result<()> {
             entry.can.bits(),
             entry.md5,
             entry.head_revision,
+            entry.drive.as_ref().map(DriveFileId::as_str),
         ],
     )?;
     Ok(())
@@ -359,6 +453,7 @@ fn entry_from_row(row: &Row<'_>) -> rusqlite::Result<FileEntry> {
         can: Capabilities::from_bits(row.get(7)?),
         md5: row.get(8)?,
         head_revision: row.get(9)?,
+        drive: row.get::<_, Option<String>>(10)?.map(DriveFileId::new),
     })
 }
 

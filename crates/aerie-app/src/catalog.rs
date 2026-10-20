@@ -22,6 +22,15 @@ impl StoreCatalog {
         self.store.root_id(&self.account).ok().flatten()
     }
 
+    pub fn indexing(&self) -> aerie_store::Indexing {
+        self.store
+            .indexing(&self.account)
+            .unwrap_or(aerie_store::Indexing {
+                all: true,
+                drives: Vec::new(),
+            })
+    }
+
     pub fn shared_drives(&self) -> Vec<FileEntry> {
         logged(self.store.shared_drives(&self.account))
     }

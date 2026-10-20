@@ -233,6 +233,14 @@ fn install_actions(
         browser,
         move |_, _| browser.download_selected()
     ));
+    let preferences = gio::SimpleAction::new("preferences", None);
+    preferences.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        #[weak]
+        window,
+        move |_, _| crate::preferences::show(&window, browser.indexing_choice())
+    ));
     let open_in_drive = gio::SimpleAction::new("open-in-drive", None);
     open_in_drive.connect_activate(glib::clone!(
         #[strong]
@@ -265,6 +273,7 @@ fn install_actions(
         &upload,
         &download,
         &open_in_drive,
+        &preferences,
     ] {
         window.add_action(action);
     }
@@ -332,6 +341,9 @@ fn handle_event(
         Event::CatalogChanged => browser.reload(),
         Event::Offline => browser.set_status(Status::Offline),
         Event::Problem(message) => toasts.add_toast(adw::Toast::new(&message)),
+        Event::FolderLoaded(folder) => browser.folder_loaded(&folder),
+        // Remote results were cached; searching the cache again includes them.
+        Event::RemoteResults { .. } => browser.reload(),
         Event::TransfersChanged
         | Event::TransferProgress { .. }
         | Event::SyncProgress { .. }
@@ -510,6 +522,8 @@ enum Status {
 /// Widgets over a [`BrowseState`]. Navigation and search rebuild the visible list.
 struct Browser {
     engine: Rc<Engine>,
+    /// A folder in an unindexed drive being fetched on demand.
+    loading_folder: RefCell<Option<DriveFileId>>,
     synced_roots: RefCell<std::collections::HashSet<DriveFileId>>,
     /// The synced folder the current pass is working in.
     active_root: RefCell<Option<DriveFileId>>,
@@ -610,6 +624,7 @@ impl Browser {
         }
         let browser = Rc::new(Self {
             engine,
+            loading_folder: RefCell::default(),
             synced_roots: RefCell::default(),
             active_root: RefCell::default(),
             crumb_mark: Cell::new(SyncMark::None),
@@ -677,6 +692,11 @@ impl Browser {
             move |search| {
                 browser.state.borrow_mut().set_query(&search.text());
                 browser.refresh();
+                // Unindexed drives are searched through Google when online.
+                let query = search.text().trim().to_owned();
+                if !query.is_empty() && !browser.index_choice().all {
+                    browser.engine.send(Command::SearchRemote(query));
+                }
             }
         ));
         browser
@@ -1425,8 +1445,58 @@ impl Browser {
         }
     }
 
+    fn index_choice(&self) -> aerie_store::Indexing {
+        match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog.indexing(),
+            AppCatalog::Samples(_) => aerie_store::Indexing {
+                all: true,
+                drives: Vec::new(),
+            },
+        }
+    }
+
+    fn indexing_choice(self: &Rc<Self>) -> Option<crate::preferences::IndexingChoice> {
+        let drives = match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog.shared_drives(),
+            AppCatalog::Samples(_) => return None,
+        };
+        let engine = self.engine.clone();
+        Some(crate::preferences::IndexingChoice {
+            current: self.index_choice(),
+            drives,
+            apply: Box::new(move |indexing| engine.send(Command::SetIndexing(indexing))),
+        })
+    }
+
+    /// Fetches the open folder when it's in a shared drive that isn't indexed.
+    fn load_if_unindexed(&self) {
+        let choice = self.index_choice();
+        let state = self.state.borrow();
+        let folder = state.current_folder().clone();
+        let drive = state.catalog().get(&folder).and_then(|entry| entry.drive);
+        drop(state);
+        match drive {
+            Some(drive) if !choice.all && !choice.drives.contains(&drive) => {
+                self.loading_folder.replace(Some(folder.clone()));
+                self.engine.send(Command::BrowseFolder { drive, folder });
+            }
+            _ => {
+                self.loading_folder.replace(None);
+            }
+        }
+    }
+
+    /// A folder fetched on demand arrived.
+    fn folder_loaded(self: &Rc<Self>, folder: &DriveFileId) {
+        if self.loading_folder.borrow().as_ref() == Some(folder) {
+            self.loading_folder.replace(None);
+            self.refresh();
+        }
+    }
+
     /// Refreshes after navigation, which ends any search.
     fn show_state(self: &Rc<Self>) {
+        self.load_if_unindexed();
         if self.search.text().is_empty() {
             self.refresh();
         } else {
@@ -1468,7 +1538,14 @@ impl Browser {
 
     /// An unfinished inventory must never look like an empty Drive.
     fn show_empty(&self, searching: bool) {
-        if self.indexing.get() {
+        if !searching && self.loading_folder.borrow().is_some() {
+            self.empty
+                .set_paintable(Some(&adw::SpinnerPaintable::new(Some(&self.empty))));
+            self.empty.set_title("Loading folder");
+            self.empty.set_description(Some(
+                "This shared drive isn’t indexed, so its folders load when you open them.",
+            ));
+        } else if self.indexing.get() {
             self.empty
                 .set_paintable(Some(&adw::SpinnerPaintable::new(Some(&self.empty))));
             self.empty.set_title("Indexing your Drive");
@@ -1604,6 +1681,7 @@ impl Browser {
                 mime_type: String::new(),
                 md5: None,
                 head_revision: None,
+                drive: None,
                 can: aerie_core::Capabilities::ALL,
             }));
             let depth = state.depth();

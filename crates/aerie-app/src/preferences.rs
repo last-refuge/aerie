@@ -100,7 +100,77 @@ fn set_start_at_login(enabled: bool) -> std::io::Result<()> {
     )
 }
 
-pub fn show(parent: &impl IsA<gtk::Widget>) {
+/// What the indexing section needs: the current choice, the shared drives to offer, and
+/// how to apply a new choice when the dialog closes.
+pub struct IndexingChoice {
+    pub current: aerie_store::Indexing,
+    pub drives: Vec<aerie_core::FileEntry>,
+    pub apply: Box<dyn Fn(aerie_store::Indexing)>,
+}
+
+/// The indexing section: index every shared drive (the default), or only chosen ones.
+fn indexing_group(choice: IndexingChoice) -> adw::PreferencesGroup {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let group = adw::PreferencesGroup::builder()
+        .title("Shared drives")
+        .description(
+            "Indexed drives are searchable and browsable offline. Others load folder by \
+             folder when you open them, and search asks Google for them when you’re online.",
+        )
+        .build();
+    let state = Rc::new(RefCell::new(choice.current.clone()));
+    let all = adw::SwitchRow::builder()
+        .title("Index all shared drives")
+        .subtitle(format!("{} shared drives", choice.drives.len()))
+        .active(choice.current.all)
+        .build();
+    group.add(&all);
+    let rows: Vec<adw::SwitchRow> = choice
+        .drives
+        .iter()
+        .map(|drive| {
+            let row = adw::SwitchRow::builder()
+                .title(gtk::glib::markup_escape_text(&drive.name).as_str())
+                .active(choice.current.drives.contains(&drive.id))
+                .visible(!choice.current.all)
+                .build();
+            let id = drive.id.clone();
+            let state = state.clone();
+            row.connect_active_notify(move |row| {
+                let mut state = state.borrow_mut();
+                state.drives.retain(|d| d != &id);
+                if row.is_active() {
+                    state.drives.push(id.clone());
+                }
+            });
+            group.add(&row);
+            row
+        })
+        .collect();
+    {
+        let state = state.clone();
+        all.connect_active_notify(move |all| {
+            state.borrow_mut().all = all.is_active();
+            for row in &rows {
+                row.set_visible(!all.is_active());
+            }
+        });
+    }
+    // Changing what's indexed starts a fresh index, so apply once, when the dialog closes.
+    let original = choice.current;
+    let apply = choice.apply;
+    group.connect_unrealize(move |_| {
+        let chosen = state.borrow().clone();
+        if chosen != original {
+            apply(chosen);
+        }
+    });
+    group
+}
+
+pub fn show(parent: &impl IsA<gtk::Widget>, indexing: Option<IndexingChoice>) {
     let settings = Settings::load();
 
     let appearance = adw::ComboRow::builder()
@@ -170,6 +240,9 @@ pub fn show(parent: &impl IsA<gtk::Widget>) {
     let page = adw::PreferencesPage::new();
     page.add(&look);
     page.add(&general);
+    if let Some(choice) = indexing {
+        page.add(&indexing_group(choice));
+    }
     page.add(&diagnostics);
     let dialog = adw::PreferencesDialog::new();
     dialog.add(&page);

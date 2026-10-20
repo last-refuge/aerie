@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use aerie_core::{Change, DriveFileId, FileEntry, redact};
-use aerie_drive::api::{ChangeCursor, Corpus, DriveApi, SharedDrive};
+use aerie_drive::api::{ChangeCursor, Corpus, DriveApi, Feed, SharedDrive};
 use aerie_drive::auth::{self, DRIVE, DRIVE_FILE, DRIVE_READONLY};
 use aerie_drive::client::OAuthClient;
 use aerie_drive::{Error as DriveError, credentials, http_client};
-use aerie_store::{Account, Direction, NewTransfer, Store, TransferState};
+use aerie_store::{Account, Direction, Indexing, NewTransfer, Store, TransferState};
 use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
@@ -98,6 +98,15 @@ pub enum Command {
     LocalChanged,
     /// Stop the engine; the service exits.
     Shutdown,
+    /// Choose whether every shared drive is indexed, or only some.
+    SetIndexing(Indexing),
+    /// Fetch a folder of a shared drive that isn't indexed, because the user opened it.
+    BrowseFolder {
+        drive: DriveFileId,
+        folder: DriveFileId,
+    },
+    /// Ask Google's search, for items in drives that aren't indexed.
+    SearchRemote(String),
 }
 
 /// A local file chosen for upload.
@@ -148,6 +157,13 @@ pub enum Event {
         done: u64,
         total: Option<u64>,
     },
+    /// Google's search found these for `query`; they're now in the cache too.
+    RemoteResults {
+        query: String,
+        entries: Vec<FileEntry>,
+    },
+    /// A folder fetched on demand is in the cache.
+    FolderLoaded(DriveFileId),
     /// A file action finished. `undo` restores a trashed item.
     Done {
         message: String,
@@ -351,6 +367,23 @@ impl Worker {
                 self.sync_due = true;
             }
             Command::LocalChanged => self.local_changed_at = Some(Instant::now()),
+            Command::SetIndexing(indexing) => {
+                let Some(account) = self.session.as_ref().map(|s| s.account.clone()) else {
+                    return;
+                };
+                if let Err(err) = self.store().set_indexing(&account, &indexing) {
+                    return self.emit(Event::Problem(err.to_string()));
+                }
+                tracing::info!(
+                    all = indexing.all,
+                    drives = indexing.drives.len(),
+                    "indexing changed"
+                );
+                self.poll_delay = FASTEST_POLL;
+                self.check().await;
+            }
+            Command::BrowseFolder { drive, folder } => self.browse_folder(drive, folder).await,
+            Command::SearchRemote(query) => self.search_remote(query).await,
             Command::ClearFinishedTransfers => {
                 if let Some(account) = self.session.as_ref().map(|s| s.account.clone()) {
                     let _ = self.store().clear_finished_transfers(&account);
@@ -867,10 +900,91 @@ impl Worker {
         self.emit(Event::Problem(message));
     }
 
+    /// The shared drives to index: all of them, or the chosen ones plus any holding a
+    /// folder that syncs.
+    fn drives_to_index(
+        &mut self,
+        account: &str,
+        drives: &[SharedDrive],
+    ) -> (bool, Vec<DriveFileId>) {
+        let indexing = self.store().indexing(account).unwrap_or(Indexing {
+            all: true,
+            drives: Vec::new(),
+        });
+        if indexing.all {
+            return (true, drives.iter().map(|d| d.id.clone()).collect());
+        }
+        let synced: Vec<DriveFileId> = self
+            .store()
+            .sync_roots(account)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|id| self.store().file(account, id).ok().flatten())
+            .filter_map(|entry| entry.drive)
+            .collect();
+        let chosen = drives
+            .iter()
+            .map(|d| d.id.clone())
+            .filter(|id| indexing.drives.contains(id) || synced.contains(id))
+            .collect();
+        (false, chosen)
+    }
+
+    async fn browse_folder(&mut self, drive: DriveFileId, folder: DriveFileId) {
+        let Some(account) = self.session.as_ref().map(|s| s.account.clone()) else {
+            return;
+        };
+        if let Err(err) = self.ensure_token().await {
+            return self.report(err);
+        }
+        let session = self.session.as_ref().expect("checked");
+        match session.drive.list_drive_folder(&drive, &folder).await {
+            Ok(entries) => {
+                let changes: Vec<_> = entries.into_iter().map(Change::Upsert).collect();
+                if let Err(err) = self.store().apply_local(&account, &changes) {
+                    tracing::error!(%err, "couldn't cache a folder");
+                }
+                self.emit(Event::FolderLoaded(folder));
+                self.emit(Event::CatalogChanged);
+            }
+            Err(err) if err.is_offline() => self.emit(Event::Offline),
+            Err(err) => self.report(err),
+        }
+    }
+
+    async fn search_remote(&mut self, query: String) {
+        let Some(account) = self.session.as_ref().map(|s| s.account.clone()) else {
+            return;
+        };
+        if self.ensure_token().await.is_err() {
+            return;
+        }
+        let session = self.session.as_ref().expect("checked");
+        match session.drive.search_names(&query, 100).await {
+            Ok(entries) => {
+                let changes: Vec<_> = entries.iter().cloned().map(Change::Upsert).collect();
+                let _ = self.store().apply_local(&account, &changes);
+                self.emit(Event::RemoteResults { query, entries });
+            }
+            // Search beyond the index is a bonus; failures stay quiet.
+            Err(err) => tracing::info!(%err, "remote search failed"),
+        }
+    }
+
     /// Lists everything, seeding the change cursor first so edits made meanwhile replay.
     async fn inventory(&mut self, account: &str) -> aerie_drive::Result<()> {
         let session = self.session.as_ref().expect("checked by caller");
-        let cursor = session.drive.start_page_token().await?;
+        // Shared drives appear as folders at the top of their own trees. Narrow scopes
+        // can't list them, which simply means none.
+        let drives = match session.drive.shared_drives().await {
+            Ok(drives) => drives,
+            Err(DriveError::Api { status: 403, .. }) => Vec::new(),
+            Err(err) => return Err(err),
+        };
+        let (all, indexed) = self.drives_to_index(account, &drives);
+        let session = self.session.as_ref().expect("checked by caller");
+        let feed = if all { Feed::Everything } else { Feed::MyDrive };
+        let cursor = session.drive.start_page_token(&feed).await?;
         // `drive.file` can't read the root folder itself; the root is inferred below.
         let root = match session.drive.root_id().await {
             Ok(root) => Some(root),
@@ -884,14 +998,22 @@ impl Worker {
             .begin_inventory(account, root.as_ref().unwrap_or(&placeholder), &cursor)
             .map_err(store_problem)?;
 
-        // Shared drives appear as folders at the top of their own trees. Narrow scopes
-        // can't list them, which simply means none.
-        let session = self.session.as_ref().expect("still signed in");
-        let drives = match session.drive.shared_drives().await {
-            Ok(drives) => drives,
-            Err(DriveError::Api { status: 403, .. }) => Vec::new(),
-            Err(err) => return Err(err),
-        };
+        // Each indexed drive gets its own feed when not everything is indexed; seed those
+        // cursors before listing too.
+        if !all {
+            for drive in &indexed {
+                let session = self.session.as_ref().expect("still signed in");
+                let cursor = session
+                    .drive
+                    .start_page_token(&Feed::SharedDrive(drive.clone()))
+                    .await?;
+                self.store
+                    .as_mut()
+                    .expect("store is open")
+                    .apply_drive_changes(account, drive, &[], &cursor)
+                    .map_err(store_problem)?;
+            }
+        }
         let drive_entries: Vec<_> = drives.iter().map(SharedDrive::as_entry).collect();
         self.store
             .as_mut()
@@ -901,20 +1023,31 @@ impl Worker {
 
         let mut files = 0u64;
         let corpora = std::iter::once(Corpus::User).chain(
-            drives
+            indexed
                 .iter()
-                .map(|drive| Corpus::SharedDrive(drive.id.clone())),
+                .map(|drive| Corpus::SharedDrive(drive.clone())),
         );
         for corpus in corpora {
             let mut page_token: Option<String> = None;
             loop {
                 // Stay responsive to sign-out during a long inventory.
                 if let Ok(command) = self.inbox.try_recv() {
-                    if matches!(command, Command::SignOut) {
-                        self.sign_out().await;
-                        return Ok(());
+                    match command {
+                        Command::SignOut => {
+                            self.sign_out().await;
+                            return Ok(());
+                        }
+                        // A new indexing choice restarts the inventory to match it.
+                        Command::SetIndexing(indexing) => {
+                            self.store()
+                                .set_indexing(account, &indexing)
+                                .map_err(store_problem)?;
+                            tracing::info!("indexing changed during inventory; restarting");
+                            self.poll_delay = FASTEST_POLL;
+                            return Ok(());
+                        }
+                        command => self.pending.push(command),
                     }
-                    self.pending.push(command);
                 }
                 let session = self.session.as_ref().expect("still signed in");
                 let (entries, next) = session
@@ -952,15 +1085,75 @@ impl Worker {
     }
 
     /// Applies every waiting page of changes. Returns whether anything changed.
-    async fn poll_changes(
+    async fn poll_changes(&mut self, account: &str, cursor: String) -> aerie_drive::Result<bool> {
+        let all = self.store().indexing(account).map_or(true, |i| i.all);
+        let feed = if all { Feed::Everything } else { Feed::MyDrive };
+        let mut changed = self.poll_feed(account, &feed, cursor).await?;
+        if !all {
+            let (listed, drives) = self.refresh_drive_list(account).await?;
+            changed |= listed;
+            let (_, indexed) = self.drives_to_index(account, &drives);
+            for drive in indexed {
+                let Some(cursor) = self.store().drive_cursor(account, &drive).ok().flatten() else {
+                    // A drive chosen since the last inventory: index everything afresh.
+                    self.inventory(account).await?;
+                    return Ok(true);
+                };
+                changed |= self
+                    .poll_feed(account, &Feed::SharedDrive(drive), cursor)
+                    .await?;
+            }
+        }
+        if changed {
+            self.emit(Event::CatalogChanged);
+        }
+        Ok(changed)
+    }
+
+    /// Keeps the list of shared drives current when the main feed leaves drives out.
+    async fn refresh_drive_list(
         &mut self,
         account: &str,
+    ) -> aerie_drive::Result<(bool, Vec<SharedDrive>)> {
+        let session = self.session.as_ref().expect("checked by caller");
+        let drives = match session.drive.shared_drives().await {
+            Ok(drives) => drives,
+            Err(DriveError::Api { status: 403, .. }) => return Ok((false, Vec::new())),
+            Err(err) => return Err(err),
+        };
+        let known = self.store().shared_drives(account).map_err(store_problem)?;
+        let mut changes: Vec<Change> = drives
+            .iter()
+            .map(SharedDrive::as_entry)
+            .filter(|entry| !known.contains(entry))
+            .map(Change::Upsert)
+            .collect();
+        changes.extend(
+            known
+                .iter()
+                .filter(|entry| !drives.iter().any(|d| d.id == entry.id))
+                .map(|entry| Change::Removed(entry.id.clone())),
+        );
+        if changes.is_empty() {
+            return Ok((false, drives));
+        }
+        self.store()
+            .apply_local(account, &changes)
+            .map_err(store_problem)?;
+        Ok((true, drives))
+    }
+
+    /// Applies every waiting page of one feed. Returns whether anything changed.
+    async fn poll_feed(
+        &mut self,
+        account: &str,
+        feed: &Feed,
         mut cursor: String,
     ) -> aerie_drive::Result<bool> {
         let mut changed = false;
         loop {
             let session = self.session.as_ref().expect("checked by caller");
-            let page = match session.drive.changes(&cursor).await {
+            let page = match session.drive.changes(feed, &cursor).await {
                 Ok(page) => page,
                 // An unusable cursor means starting over with a fresh inventory, which
                 // never treats missing results as deletions.
@@ -978,18 +1171,20 @@ impl Worker {
             let next = match &page.next {
                 ChangeCursor::MorePages(token) | ChangeCursor::CaughtUp(token) => token.clone(),
             };
-            self.store
-                .as_mut()
-                .expect("store is open")
-                .apply_changes(account, &page.changes, &next)
-                .map_err(store_problem)?;
+            let store = self.store.as_mut().expect("store is open");
+            match feed {
+                Feed::SharedDrive(drive) => {
+                    store.apply_drive_changes(account, drive, &page.changes, &next)
+                }
+                Feed::Everything | Feed::MyDrive => {
+                    store.apply_changes(account, &page.changes, &next)
+                }
+            }
+            .map_err(store_problem)?;
             cursor = next;
             if matches!(page.next, ChangeCursor::CaughtUp(_)) {
                 break;
             }
-        }
-        if changed {
-            self.emit(Event::CatalogChanged);
         }
         Ok(changed)
     }

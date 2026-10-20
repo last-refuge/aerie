@@ -125,6 +125,7 @@ mod tests {
             can: Capabilities::ALL,
             md5: (!folder).then(|| format!("md5-{id}")),
             head_revision: None,
+            drive: None,
         }
     }
 

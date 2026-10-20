@@ -202,6 +202,7 @@ mod tests {
             mime_type: String::new(),
             md5: None,
             head_revision: None,
+            drive: None,
             can: crate::Capabilities::ALL,
         }
     }
