@@ -105,8 +105,11 @@ pub fn build_window(app: &adw::Application, present: bool) {
                     Event::Sync(crate::engine::SyncState::Off) | Event::NeedsSignIn { .. }
                 );
                 if idle && !window.is_visible() {
+                    tracing::info!("nothing to run in the background; exiting");
                     browser.set_background(&window, false);
-                    window.close();
+                    if let Some(app) = window.application() {
+                        app.quit();
+                    }
                 }
                 match event {
                     Event::TransferProgress { id, done, total } => {
@@ -132,6 +135,17 @@ pub fn build_window(app: &adw::Application, present: bool) {
             }
         }
     ));
+
+    // Closing the window quits, unless sync keeps Aerie running in the background. An
+    // explicit quit avoids lingering when widgets still hold references to the window.
+    window.connect_close_request(|window| {
+        if !window.hides_on_close()
+            && let Some(app) = window.application()
+        {
+            app.quit();
+        }
+        glib::Propagation::Proceed
+    });
 
     if present {
         window.present();
