@@ -193,6 +193,8 @@ mod tests {
             size: None,
             modified: 0,
             mime_type: String::new(),
+            md5: None,
+            head_revision: None,
             can: crate::Capabilities::ALL,
         }
     }

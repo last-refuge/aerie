@@ -17,6 +17,7 @@ aerie-store = { path = "crates/aerie-store" }
 aerie-sync = { path = "crates/aerie-sync" }
 async-channel = "2"
 axum = "0.8"
+gio = "0.22"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_16"] }
 oauth2 = "5"
 oo7 = "0.6"

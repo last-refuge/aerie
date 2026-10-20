@@ -8,6 +8,12 @@ repository.workspace = true
 
 [dependencies]
 aerie-core.workspace = true
+aerie-drive.workspace = true
+aerie-store.workspace = true
+gio.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

@@ -30,6 +30,10 @@ pub struct FileEntry {
     pub mime_type: String,
     /// What the signed-in user may do with the item.
     pub can: Capabilities,
+    /// Content checksum; Drive reports none for folders and Google-native documents.
+    pub md5: Option<String>,
+    /// Drive's current revision of the content.
+    pub head_revision: Option<String>,
 }
 
 /// Per-item permissions reported by Drive. Actions are offered only when allowed.
