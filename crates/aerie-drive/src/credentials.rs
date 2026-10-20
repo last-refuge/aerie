@@ -7,10 +7,18 @@ use crate::Result;
 
 const LABEL: &str = "Aerie Google Drive sign-in";
 
+/// Development builds keep their own sign-ins, so trying one never replaces, or signs
+/// another account into, the installed Aerie.
+const APPLICATION: &str = if cfg!(debug_assertions) {
+    "ai.lastrefuge.Aerie.Devel"
+} else {
+    "ai.lastrefuge.Aerie"
+};
+
 /// One stored sign-in per OAuth scope, so a narrow test grant never replaces the main one.
 fn attributes(scope: &str) -> HashMap<&'static str, &str> {
     HashMap::from([
-        ("application", "ai.lastrefuge.Aerie"),
+        ("application", APPLICATION),
         ("kind", "google-refresh-token"),
         ("scope", scope),
     ])

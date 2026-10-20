@@ -1,0 +1,18 @@
+# id	show	caption (shown in the video; \N breaks a line)	instruction (shown to you while recording)
+welcome	aerie	Aerie is a native Google Drive client for Linux. This is its first launch.	Wait for Aerie's welcome screen to appear, then leave it on screen for a few seconds.
+connect	aerie	Clicking "Connect Google Drive" starts Google's OAuth sign-in in the browser.	Click "Connect Google Drive".
+consent-read	browser	Google's consent screen for Aerie. The address bar shows Aerie's OAuth client ID.\NScope requested: drive.readonly — "See and download all your Google Drive files"	In Chrome, choose the account. On the consent screen, check the language (bottom left) is English, scroll so the whole screen shows, pause 5 seconds, then click Continue/Allow.
+granted	browser	Access granted. Google returns the user to Aerie.	When Chrome says you can close the tab, switch back to Aerie.
+indexing	aerie	drive.readonly: Aerie reads file metadata to build a local index of My Drive and shared drives.	Let Aerie index for a few seconds (the sidebar shows progress).
+browse	aerie	drive.readonly: browsing folders in My Drive.	Open a folder or two in My Drive.
+shared	aerie	drive.readonly: browsing shared drives.	Click a shared drive in the sidebar and open a folder in it (skip if the account has none).
+search	aerie	drive.readonly: searching all files by name.	Press Ctrl+K and search for a file name.
+download	aerie	drive.readonly: downloading a file to this computer.	Select a file, press Ctrl+D (Download), and save it.
+ask-write	aerie	Changing files needs more access. Aerie asks only when the user first makes a change.	Clear the search, go to My Drive, and press Ctrl+Shift+N (New folder). When Aerie asks to allow changes, confirm.
+consent-write	browser	Consent for changes. The address bar shows Aerie's OAuth client ID.\NScope requested: drive — "See, edit, create, and delete all of your Google Drive files"	On the consent screen, check the language is English, pause 5 seconds, then click Continue/Allow.
+create	aerie	drive: creating a folder in Google Drive.	Back in Aerie, create a folder named "Aerie demo".
+upload	aerie	drive: uploading files into it.	Open "Aerie demo" and drag a file in from Files (or press Ctrl+U).
+rename	aerie	drive: renaming and moving items.	Rename the uploaded file (F2), then move it (Ctrl+M) if you like.
+trash	aerie	drive: moving an item to the trash, with undo. Aerie never deletes permanently.	Move the file to the trash (Delete), then click Undo on the message.
+sync	aerie	drive: keeping a chosen folder in two-way sync with a folder on this computer.	Open Sync in the sidebar, choose "Aerie demo" to sync, and let a pass finish.
+web	browser	The same changes, seen in Google Drive on the web.	In Chrome, open drive.google.com and show the "Aerie demo" folder.
