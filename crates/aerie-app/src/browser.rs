@@ -18,10 +18,9 @@ use crate::fixtures::{self, ROOT_ID};
 use crate::sync_page::SyncPage;
 use crate::transfers_page::TransfersPage;
 
-/// Opens the main window, or builds it hidden when Aerie starts in the background at
-/// login. A hidden start with nothing to sync quits once that's known.
-pub fn build_window(app: &adw::Application, present: bool) {
-    // A window hidden while sync runs in the background comes back.
+/// Opens the main window. Drive work happens in `aerie-service`, which keeps syncing after
+/// the window closes.
+pub fn build_window(app: &adw::Application) {
     if let Some(window) = app.windows().first() {
         window.present();
         return;
@@ -96,20 +95,7 @@ pub fn build_window(app: &adw::Application, present: bool) {
                     Event::Sync(_) | Event::SignedIn(_) | Event::SignedOut | Event::CatalogChanged
                 ) {
                     let (settings, roots, folders) = browser.sync_view();
-                    browser.set_background(&window, settings.as_ref().is_some_and(|s| !s.paused));
                     sync.show(settings, roots, folders);
-                }
-                // Started in the background with nothing to keep running for: exit.
-                let idle = matches!(
-                    event,
-                    Event::Sync(crate::engine::SyncState::Off) | Event::NeedsSignIn { .. }
-                );
-                if idle && !window.is_visible() {
-                    tracing::info!("nothing to run in the background; exiting");
-                    browser.set_background(&window, false);
-                    if let Some(app) = window.application() {
-                        app.quit();
-                    }
                 }
                 match event {
                     Event::TransferProgress { id, done, total } => {
@@ -136,20 +122,16 @@ pub fn build_window(app: &adw::Application, present: bool) {
         }
     ));
 
-    // Closing the window quits, unless sync keeps Aerie running in the background. An
-    // explicit quit avoids lingering when widgets still hold references to the window.
+    // Closing the window quits the app; the service carries on syncing. An explicit quit
+    // avoids lingering when widgets still hold references to the window.
     window.connect_close_request(|window| {
-        if !window.hides_on_close()
-            && let Some(app) = window.application()
-        {
+        if let Some(app) = window.application() {
             app.quit();
         }
         glib::Propagation::Proceed
     });
 
-    if present {
-        window.present();
-    }
+    window.present();
 }
 
 fn install_actions(
@@ -311,7 +293,7 @@ fn handle_event(
             welcome.set_waiting(false);
             browser.show_drive(&account);
             set_action_enabled(window, "sign-out", true);
-            stack.set_visible_child_name("browser");
+            show_page(stack, "browser");
         }
         Event::NeedsSignIn { expired } => {
             welcome.set_waiting(false);
@@ -361,6 +343,17 @@ fn notify(window: &adw::ApplicationWindow, id: &str, title: &str, body: &str) {
         notification.set_body(Some(body));
         app.send_notification(Some(id), &notification);
     }
+}
+
+/// Switches pages, without the crossfade before the window is on screen: a transition
+/// started while unmapped can leave the old page showing.
+fn show_page(stack: &gtk::Stack, name: &str) {
+    let transition = if stack.is_mapped() {
+        stack.transition_type()
+    } else {
+        gtk::StackTransitionType::None
+    };
+    stack.set_visible_child_full(name, transition);
 }
 
 fn open_uri(window: &adw::ApplicationWindow, uri: &str) {
@@ -505,8 +498,6 @@ struct Browser {
     transfers_badge: gtk::Label,
     sync_row: gtk::ListBoxRow,
     sync_state: RefCell<Option<crate::engine::SyncState>>,
-    /// Keeps the app running with the window closed while sync is on.
-    background: RefCell<Option<gio::ApplicationHoldGuard>>,
     selection: gtk::SingleSelection,
     state: RefCell<BrowseState<AppCatalog>>,
     account: RefCell<Option<Account>>,
@@ -598,7 +589,6 @@ impl Browser {
             transfers_badge,
             sync_row: sidebar_row("aerie-refresh-cw-symbolic", "Sync"),
             sync_state: RefCell::default(),
-            background: RefCell::default(),
             selection: selection.clone(),
             state: RefCell::new(samples()),
             account: RefCell::default(),
@@ -838,18 +828,6 @@ impl Browser {
         let off = state == crate::engine::SyncState::Off;
         self.sync_state.replace((!off).then_some(state));
         self.set_status(Status::UpToDate);
-    }
-
-    /// While sync runs, closing the window hides it and Aerie keeps working; Quit in the
-    /// main menu stops everything.
-    fn set_background(&self, window: &adw::ApplicationWindow, on: bool) {
-        window.set_hide_on_close(on);
-        let mut guard = self.background.borrow_mut();
-        match (on, guard.is_some()) {
-            (true, false) => *guard = window.application().map(|app| app.hold()),
-            (false, true) => *guard = None,
-            _ => {}
-        }
     }
 
     fn set_transfer_count(&self, active: usize) {

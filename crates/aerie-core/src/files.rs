@@ -1,9 +1,11 @@
 //! File metadata as presented by the browser.
 
+use serde::{Deserialize, Serialize};
+
 use crate::DriveFileId;
 
 /// Broad file category, used for icons and sorting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FileKind {
     Folder,
     Document,
@@ -15,7 +17,7 @@ pub enum FileKind {
 }
 
 /// Cached metadata for one Drive item.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileEntry {
     pub id: DriveFileId,
     /// Containing folder; `None` only for the My Drive root.
@@ -37,7 +39,7 @@ pub struct FileEntry {
 }
 
 /// Per-item permissions reported by Drive. Actions are offered only when allowed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Capabilities {
     pub rename: bool,
     pub trash: bool,

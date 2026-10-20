@@ -29,7 +29,7 @@ pub use transfers::{Direction, NewTransfer, Transfer, TransferState};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A signed-in Google account. `id` is Drive's stable `permissionId`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Account {
     pub id: String,
     pub email: String,

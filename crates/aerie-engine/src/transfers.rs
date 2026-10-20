@@ -12,7 +12,7 @@ use aerie_drive::{Error as DriveError, Result};
 use aerie_store::{Direction, Store, Transfer};
 use async_channel::Sender;
 
-use crate::engine::Event;
+use crate::Event;
 
 /// Large enough to keep requests few, small enough to resume cheaply.
 const CHUNK: usize = CHUNK_UNIT * 32;

@@ -1,0 +1,23 @@
+[package]
+name = "aerie-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aerie-service"
+path = "src/main.rs"
+
+[dependencies]
+aerie-engine.workspace = true
+async-channel.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

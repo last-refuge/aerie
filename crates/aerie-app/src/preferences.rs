@@ -95,7 +95,7 @@ fn set_start_at_login(enabled: bool) -> std::io::Result<()> {
         &path,
         format!(
             "[Desktop Entry]\nType=Application\nName=Aerie\nComment=Keep Google Drive folders in sync\n\
-             Exec=aerie --background\nIcon={APP_ID}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+             Exec=aerie-service\nIcon={APP_ID}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
         ),
     )
 }
@@ -128,7 +128,9 @@ pub fn show(parent: &impl IsA<gtk::Widget>) {
 
     let login = adw::SwitchRow::builder()
         .title("Start at login")
-        .subtitle("Aerie starts in the background and keeps your folders in sync.")
+        .subtitle(
+            "Keeps your folders in sync from the moment you log in, without opening a window.",
+        )
         .active(starts_at_login())
         .build();
     login.connect_active_notify(|row| {
