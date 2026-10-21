@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.4.8" date="2026-10-21">
+      <description>
+        <p>Filter the sidebar to show only synced shared drives.</p>
+      </description>
+    </release>
     <release version="0.4.7" date="2026-10-21">
       <description>
         <p>Synced drives show a badge in the sidebar.</p>

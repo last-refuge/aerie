@@ -631,6 +631,12 @@ struct Browser {
     /// Synced badges in the sidebar, for My Drive and each shared drive.
     my_drive_badge: gtk::Image,
     drive_badges: RefCell<Vec<(DriveFileId, gtk::Image)>>,
+    /// Shared drives with something syncing: the whole drive or a folder in it.
+    synced_drives: RefCell<std::collections::HashSet<DriveFileId>>,
+    /// Lists every shared drive, or only the synced ones; remembered.
+    synced_only: gtk::ToggleButton,
+    /// Says so when the synced-only list is empty.
+    no_synced_drives: gtk::Label,
     drives: RefCell<Vec<FileEntry>>,
     places: gtk::ListBox,
     /// The content area: the file list, or the transfer list.
@@ -788,6 +794,16 @@ impl Browser {
             drives: RefCell::default(),
             my_drive_badge: sidebar_badge(),
             drive_badges: RefCell::default(),
+            synced_drives: RefCell::default(),
+            synced_only: gtk::ToggleButton::builder().label("Synced").build(),
+            no_synced_drives: gtk::Label::builder()
+                .label("No shared drives sync yet.")
+                .xalign(0.0)
+                .margin_start(18)
+                .margin_top(6)
+                .css_classes(["metadata"])
+                .visible(false)
+                .build(),
             places: gtk::ListBox::builder()
                 .css_classes(["navigation-sidebar"])
                 .build(),
@@ -1916,8 +1932,38 @@ impl Browser {
         self.drives_header.set_child(Some(&heading));
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        // All or synced drives, as a small two-way switch.
+        let all = gtk::ToggleButton::builder().label("All").build();
+        self.synced_only.set_group(Some(&all));
+        let choice = gtk::Box::builder()
+            .css_classes(["linked", "drive-scope"])
+            .halign(gtk::Align::Start)
+            .margin_start(12)
+            .margin_bottom(6)
+            .build();
+        choice.append(&all);
+        choice.append(&self.synced_only);
+        let synced_only = crate::preferences::Settings::load().synced_drives_only;
+        if synced_only {
+            self.synced_only.set_active(true);
+        } else {
+            all.set_active(true);
+        }
+        self.synced_only.connect_toggled(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |button| {
+                let mut settings = crate::preferences::Settings::load();
+                settings.synced_drives_only = button.is_active();
+                settings.save();
+                browser.drives_list.invalidate_filter();
+                browser.update_no_synced_drives();
+            }
+        ));
+        content.append(&choice);
         content.append(&self.drives_filter);
         content.append(&self.drives_list);
+        content.append(&self.no_synced_drives);
         self.drives_revealer.set_child(Some(&content));
 
         let expanded = !crate::preferences::Settings::load().drives_collapsed;
@@ -1940,13 +1986,15 @@ impl Browser {
             #[upgrade_or]
             true,
             move |row| {
+                let drives = browser.drives.borrow();
+                let Some(drive) = drives.get(row.index() as usize) else {
+                    return true;
+                };
                 let query = browser.drives_filter.text().to_lowercase();
-                query.is_empty()
-                    || browser
-                        .drives
-                        .borrow()
-                        .get(row.index() as usize)
-                        .is_some_and(|drive| drive.name.to_lowercase().contains(&query))
+                let named = query.is_empty() || drive.name.to_lowercase().contains(&query);
+                let shown = !browser.synced_only.is_active()
+                    || browser.synced_drives.borrow().contains(&drive.id);
+                named && shown
             }
         ));
         self.drives_filter.connect_search_changed(glib::clone!(
@@ -2198,8 +2246,49 @@ impl Browser {
     }
 
     /// Marks the synced folder a pass is working in, or none.
+    /// Which shared drives have something syncing, for the synced-only filter.
+    fn update_synced_drives(&self) {
+        let roots = match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog.sync_roots(),
+            AppCatalog::Samples(_) => Vec::new(),
+        };
+        let mut synced = std::collections::HashSet::new();
+        {
+            let state = self.state.borrow();
+            let catalog = state.catalog();
+            for root in roots {
+                let mut current = Some(root);
+                // Bounded, so a cycle in bad metadata can't hang the app.
+                for _ in 0..256 {
+                    let Some(id) = current else { break };
+                    match catalog.get(&id) {
+                        Some(entry) if entry.mime_type == aerie_drive::api::SHARED_DRIVE_MIME => {
+                            synced.insert(entry.id);
+                            break;
+                        }
+                        Some(entry) => current = entry.parent,
+                        None => break,
+                    }
+                }
+            }
+        }
+        if *self.synced_drives.borrow() != synced {
+            self.synced_drives.replace(synced);
+            self.drives_list.invalidate_filter();
+        }
+        self.update_no_synced_drives();
+    }
+
+    fn update_no_synced_drives(&self) {
+        let empty = self.synced_only.is_active()
+            && !self.drives.borrow().is_empty()
+            && self.synced_drives.borrow().is_empty();
+        self.no_synced_drives.set_visible(empty);
+    }
+
     /// Badges My Drive and the shared drives in the sidebar that sync as a whole.
     fn update_sidebar_marks(&self) {
+        self.update_synced_drives();
         let roots = self.synced_roots.borrow();
         let active = self.active_root.borrow();
         let mark = |id: &DriveFileId| match (roots.contains(id), active.as_ref() == Some(id)) {
