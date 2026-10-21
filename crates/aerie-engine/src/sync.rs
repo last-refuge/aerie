@@ -70,12 +70,11 @@ impl Worker {
             .collect()
     }
 
-    /// The local folder name each chosen Drive folder syncs to.
+    /// Where each chosen Drive folder syncs to, relative to the sync folder.
     fn root_paths(&mut self, account: &str, roots: &[DriveFileId]) -> Vec<PathBuf> {
-        roots
-            .iter()
-            .filter_map(|id| self.store().sync_root_entry(account, id).ok().flatten())
-            .map(|entry| PathBuf::from(aerie_sync::tree::local_name(&entry.name)))
+        aerie_sync::cycle::root_locations(self.store(), account, roots)
+            .into_iter()
+            .map(|(_, path)| path)
             .collect()
     }
 

@@ -1090,14 +1090,13 @@ impl Browser {
             std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Aerie"));
         match suggested.filter(|path| crate::sync_page::is_empty_or_missing(path)) {
             Some(local_root) if std::fs::create_dir_all(&local_root).is_ok() => {
-                let shown = local_root.join(name);
+                let shown = local_root.to_string_lossy().into_owned();
                 self.engine.send(Command::StartSync {
                     local_root,
                     roots: vec![folder.id.clone()],
                 });
                 self.toast(adw::Toast::new(&format!(
-                    "Syncing “{name}” to {}",
-                    shown.to_string_lossy()
+                    "Syncing “{name}” into {shown}, in the same folders as on Drive"
                 )));
             }
             _ => {

@@ -30,24 +30,65 @@ pub fn local_name(name: &str) -> String {
     }
 }
 
-fn numbered(name: &str, n: usize) -> String {
+pub(crate) fn numbered(name: &str, n: usize) -> String {
     match name.rfind('.') {
         Some(dot) if dot > 0 => format!("{} ({n}){}", &name[..dot], &name[dot..]),
         _ => format!("{name} ({n})"),
     }
 }
 
-/// Places every syncable item under the selected `roots`. Each root becomes a top-level
-/// folder named after it. `children` lists a folder's cached children.
+/// Items shared with the user that sit outside My Drive and every shared drive.
+pub const SHARED_WITH_ME: &str = "Shared with me";
+
+/// Where a synced folder goes on this computer: its whole path in Drive, under
+/// "My Drive", its shared drive's name, or "Shared with me" for anything outside both.
+/// `lookup` reads a cached item by ID.
+pub fn root_path(
+    entry: &FileEntry,
+    my_drive: Option<&DriveFileId>,
+    lookup: &dyn Fn(&DriveFileId) -> Option<FileEntry>,
+) -> PathBuf {
+    if Some(&entry.id) == my_drive {
+        return PathBuf::from(aerie_store::MY_DRIVE);
+    }
+    let mut names = vec![local_name(&entry.name)];
+    let mut top = entry.clone();
+    // Bounded, so a cycle in bad metadata can't hang a pass.
+    for _ in 0..256 {
+        match top.parent.clone() {
+            Some(parent) if Some(&parent) == my_drive => {
+                names.push(aerie_store::MY_DRIVE.to_owned());
+                break;
+            }
+            Some(parent) => match lookup(&parent) {
+                Some(above) => {
+                    names.push(local_name(&above.name));
+                    top = above;
+                }
+                None => {
+                    names.push(SHARED_WITH_ME.to_owned());
+                    break;
+                }
+            },
+            None => {
+                if top.mime_type != aerie_drive::api::SHARED_DRIVE_MIME {
+                    names.push(SHARED_WITH_ME.to_owned());
+                }
+                break;
+            }
+        }
+    }
+    names.into_iter().rev().collect()
+}
+
+/// Places every syncable item under the selected roots, each at its own local path (see
+/// [`root_path`]). `children` lists a folder's cached children.
 pub fn remote_items(
-    roots: &[FileEntry],
+    roots: &[(FileEntry, PathBuf)],
     children: &dyn Fn(&DriveFileId) -> Vec<FileEntry>,
 ) -> Vec<RemoteItem> {
     let mut items = Vec::new();
-    let mut pending: Vec<(FileEntry, PathBuf)> = Vec::new();
-    for (root, name) in roots.iter().zip(unique_names(roots)) {
-        pending.push((root.clone(), PathBuf::from(name)));
-    }
+    let mut pending: Vec<(FileEntry, PathBuf)> = roots.to_vec();
     while let Some((entry, path)) = pending.pop() {
         items.push(RemoteItem {
             id: entry.id.clone(),
@@ -149,7 +190,7 @@ mod tests {
                 .cloned()
                 .collect()
         };
-        let mut paths: Vec<_> = remote_items(&[docs], &children)
+        let mut paths: Vec<_> = remote_items(&[(docs, PathBuf::from("Docs"))], &children)
             .into_iter()
             .map(|item| item.path.to_string_lossy().into_owned())
             .collect();
@@ -174,5 +215,58 @@ mod tests {
         assert_eq!(local_name("a/b"), "a∕b");
         assert_eq!(numbered("report.final.pdf", 2), "report.final (2).pdf");
         assert_eq!(numbered(".hidden", 3), ".hidden (3)");
+    }
+}
+
+#[cfg(test)]
+mod root_path_tests {
+    use super::*;
+
+    fn folder(id: &str, parent: Option<&str>, name: &str) -> FileEntry {
+        FileEntry {
+            id: DriveFileId::new(id),
+            parent: parent.map(DriveFileId::new),
+            name: name.to_owned(),
+            kind: aerie_core::FileKind::Folder,
+            size: None,
+            modified: 0,
+            mime_type: "application/vnd.google-apps.folder".to_owned(),
+            md5: None,
+            head_revision: None,
+            drive: None,
+            can: aerie_core::Capabilities::default(),
+        }
+    }
+
+    #[test]
+    fn synced_folders_keep_their_drive_path() {
+        let root = DriveFileId::new("root");
+        let mut drive = folder("team", None, "Team");
+        drive.mime_type = aerie_drive::api::SHARED_DRIVE_MIME.to_owned();
+        let all = [
+            folder("clients", Some("root"), "Clients"),
+            folder("acme", Some("clients"), "Acme/West"),
+            drive.clone(),
+            folder("plans", Some("team"), "Plans"),
+        ];
+        let lookup = |id: &DriveFileId| all.iter().find(|e| e.id == *id).cloned();
+        let path = |entry: &FileEntry| root_path(entry, Some(&root), &lookup);
+
+        assert_eq!(path(&all[1]), PathBuf::from("My Drive/Clients/Acme∕West"));
+        assert_eq!(path(&all[0]), PathBuf::from("My Drive/Clients"));
+        assert_eq!(
+            path(&folder("root", None, "My Drive")),
+            PathBuf::from("My Drive")
+        );
+        assert_eq!(path(&drive), PathBuf::from("Team"));
+        assert_eq!(path(&all[3]), PathBuf::from("Team/Plans"));
+        assert_eq!(
+            path(&folder("theirs", Some("unknown"), "Theirs")),
+            PathBuf::from("Shared with me/Theirs")
+        );
+        assert_eq!(
+            path(&folder("loose", None, "Loose")),
+            PathBuf::from("Shared with me/Loose")
+        );
     }
 }
