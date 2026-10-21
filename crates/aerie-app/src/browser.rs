@@ -603,6 +603,8 @@ struct Browser {
     view: gtk::ColumnView,
     search: gtk::SearchEntry,
     breadcrumbs: gtk::Box,
+    /// Keeps the open folder (or drive) in sync; pressed while it syncs.
+    sync_button: gtk::ToggleButton,
     content: gtk::Stack,
     empty: adw::StatusPage,
     banner: adw::Banner,
@@ -754,6 +756,10 @@ impl Browser {
             store,
             view,
             search,
+            sync_button: gtk::ToggleButton::builder()
+                .icon_name("aerie-folder-sync-symbolic")
+                .visible(false)
+                .build(),
             breadcrumbs: gtk::Box::builder()
                 .spacing(2)
                 .css_classes(["breadcrumbs"])
@@ -852,7 +858,51 @@ impl Browser {
 
     /// Enables only the actions that make sense for the selection and the item's
     /// permissions. Sample data supports nothing but new folders.
+    /// The folder being browsed as a syncable entry: My Drive or a shared drive at their
+    /// top, otherwise the folder itself.
+    fn open_folder(&self) -> Option<FileEntry> {
+        let state = self.state.borrow();
+        let AppCatalog::Drive(catalog) = state.catalog() else {
+            return None;
+        };
+        if state.is_searching() {
+            return None;
+        }
+        let current = state.current_folder();
+        if current == state.root() {
+            return match self.tree.borrow().as_ref() {
+                Some(drive) => Some(drive.clone()),
+                None => catalog.my_drive(),
+            };
+        }
+        state.catalog().get(current).filter(FileEntry::is_folder)
+    }
+
+    /// Shows whether the open folder syncs, on its own or as part of a synced folder.
+    fn update_sync_button(&self) {
+        let Some(folder) = self.open_folder() else {
+            self.sync_button.set_visible(false);
+            return;
+        };
+        let roots = self.sync_view().1;
+        let own = roots.contains(&folder.id);
+        let outer = roots
+            .iter()
+            .find(|root| self.is_inside(&folder.id, root))
+            .cloned();
+        self.sync_button.set_visible(true);
+        self.sync_button.set_active(own || outer.is_some());
+        self.sync_button.set_sensitive(outer.is_none());
+        let tooltip = match (&outer, own) {
+            (Some(outer), _) => format!("Syncs as part of “{}”", self.folder_name(outer)),
+            (None, true) => format!("Stop syncing “{}”", folder.name),
+            (None, false) => format!("Keep “{}” in sync", folder.name),
+        };
+        self.sync_button.set_tooltip_text(Some(&tooltip));
+    }
+
     fn update_actions(&self) {
+        self.update_sync_button();
         let Some(window) = self.window() else { return };
         let drive = self.is_drive();
         let selected = self.selected().filter(|_| drive);
@@ -1376,6 +1426,19 @@ impl Browser {
             .sync_create()
             .build();
         header.pack_end(&upload);
+        // The button only reflects state; a click asks for the change, and the next
+        // refresh shows the result.
+        self.sync_button.connect_clicked(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_| {
+                if let Some(folder) = browser.open_folder() {
+                    browser.toggle_sync_root(folder);
+                }
+                browser.update_sync_button();
+            }
+        ));
+        header.pack_end(&self.sync_button);
 
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         body.append(&self.breadcrumbs);
