@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.4.4" date="2026-10-21">
+      <description>
+        <p>Synced folders keep their place in Drive's folder structure on this computer.</p>
+      </description>
+    </release>
     <release version="0.4.3" date="2026-10-21">
       <description>
         <p>A toolbar button keeps the open folder in sync.</p>

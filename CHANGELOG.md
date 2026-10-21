@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 beta
+
+- **Drive's folder structure, kept:** a synced folder lands in the same place it has on Drive. Syncing "Acme" from My Drive › Clients puts it at `~/Aerie/My Drive/Clients/Acme`; a shared drive's folders go under the drive's name, and items shared with you under "Shared with me". Folders synced by earlier versions move into place on the first pass, without downloading anything again. The folders above a synced one only hold it; they aren't synced themselves.
+
 ## 0.4.3 beta
 
 - **Sync button:** the toolbar has a sync toggle for the folder you have open, or the whole drive when you're at its top. It's pressed while that folder syncs, and greyed out with a note when it syncs as part of a folder above it.
