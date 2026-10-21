@@ -46,6 +46,9 @@ pub fn build_window(app: &adw::Application) {
         .transition_type(gtk::StackTransitionType::Crossfade)
         .transition_duration(180)
         .build();
+    // Until the service says who's signed in (or that nobody is), show that Aerie is
+    // starting rather than asking to connect: replacing an older service takes a moment.
+    stack.add_named(&starting_page(), Some("starting"));
     stack.add_named(&welcome.root, Some("welcome"));
     stack.add_named(&split, Some("browser"));
     let toasts = adw::ToastOverlay::new();
@@ -59,6 +62,19 @@ pub fn build_window(app: &adw::Application) {
     window.add_breakpoint(narrow);
 
     install_actions(&window, &stack, &browser, &welcome, &engine);
+    // If the service never answers, don't leave a spinner up forever.
+    glib::timeout_add_seconds_local_once(
+        20,
+        glib::clone!(
+            #[weak]
+            stack,
+            move || {
+                if stack.visible_child_name().as_deref() == Some("starting") {
+                    stack.set_visible_child_name("welcome");
+                }
+            }
+        ),
+    );
     welcome.explore.connect_clicked(glib::clone!(
         #[weak]
         stack,
@@ -409,6 +425,20 @@ fn notify(window: &adw::ApplicationWindow, id: &str, title: &str, body: &str) {
 
 /// Switches pages, without the crossfade before the window is on screen: a transition
 /// started while unmapped can leave the old page showing.
+fn starting_page() -> gtk::Widget {
+    let spinner = adw::SpinnerPaintable::new(None::<&gtk::Widget>);
+    let page = adw::StatusPage::builder()
+        .paintable(&spinner)
+        .title("Starting Aerie")
+        .build();
+    spinner.set_widget(Some(&page));
+    let view = adw::ToolbarView::new();
+    view.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
+    view.set_content(Some(&page));
+    view.add_css_class("aerie-welcome");
+    view.upcast()
+}
+
 fn show_page(stack: &gtk::Stack, name: &str) {
     let transition = if stack.is_mapped() {
         stack.transition_type()

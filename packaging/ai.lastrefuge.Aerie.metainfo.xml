@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.4.6" date="2026-10-21">
+      <description>
+        <p>Shows "Starting Aerie" while the background service starts, instead of asking to connect.</p>
+      </description>
+    </release>
     <release version="0.4.5" date="2026-10-21">
       <description>
         <p>A progress bar and the current file while syncing.</p>
