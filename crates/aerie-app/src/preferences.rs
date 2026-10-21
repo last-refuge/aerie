@@ -28,6 +28,8 @@ pub struct Settings {
     pub pinned_drives: Vec<String>,
     /// Whether the shared drives section is folded away.
     pub drives_collapsed: bool,
+    /// Whether the sidebar lists only shared drives with something syncing.
+    pub synced_drives_only: bool,
 }
 
 fn config_dir() -> PathBuf {

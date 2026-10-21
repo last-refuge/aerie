@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.8 beta
+
+- **Synced drives filter:** an All / Synced switch above the shared drives in the sidebar. Synced shows only drives with something syncing, the whole drive or a folder in it. All is the default, and Aerie remembers your choice.
+
 ## 0.4.7 beta
 
 - **Sync badges in the sidebar:** My Drive and shared drives that sync as a whole show the same badge as synced folders: a cloud with a check, turning while they sync.
