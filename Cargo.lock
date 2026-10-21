@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aerie-app"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aerie-core",
  "aerie-drive",
@@ -25,14 +25,14 @@ dependencies = [
 
 [[package]]
 name = "aerie-core"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "aerie-drive"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aerie-core",
  "axum",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "aerie-engine"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aerie-core",
  "aerie-drive",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "aerie-service"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aerie-engine",
  "async-channel",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "aerie-store"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aerie-core",
  "rusqlite",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "aerie-sync"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "aerie-core",
  "aerie-drive",

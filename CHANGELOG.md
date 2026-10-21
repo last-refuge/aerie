@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.6 beta
+
+- **No false sign-in prompt after updating:** while Aerie waits for its background service (which takes a few seconds after an update replaces the old one), it shows "Starting Aerie" instead of asking you to connect Google Drive.
+
 ## 0.4.5 beta
 
 - **Sync progress:** while sync works, the sidebar and the Sync page show a progress bar, how many changes are done ("12 of 340 changes") and what's happening now ("Downloading report.pdf in Acme"). Progress updates several times a second instead of every 25 changes.
