@@ -22,6 +22,12 @@ impl StoreCatalog {
         self.store.root_id(&self.account).ok().flatten()
     }
 
+    /// My Drive as a folder that can be synced.
+    pub fn my_drive(&self) -> Option<FileEntry> {
+        let root = self.root()?;
+        logged(self.store.sync_root_entry(&self.account, &root))
+    }
+
     pub fn indexing(&self) -> aerie_store::Indexing {
         self.store
             .indexing(&self.account)

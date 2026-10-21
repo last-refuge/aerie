@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.4.2" date="2026-10-21">
+      <description>
+        <p>Sync all of My Drive or an entire shared drive.</p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-10-21">
       <description>
         <p>Right-click a folder to keep it in sync.</p>
