@@ -409,7 +409,7 @@ impl SyncPage {
     }
 }
 
-fn is_empty_or_missing(path: &std::path::Path) -> bool {
+pub(crate) fn is_empty_or_missing(path: &std::path::Path) -> bool {
     match std::fs::read_dir(path) {
         Ok(mut entries) => entries.next().is_none(),
         Err(err) => err.kind() == std::io::ErrorKind::NotFound,

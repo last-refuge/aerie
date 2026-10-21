@@ -247,6 +247,13 @@ fn install_actions(
         browser,
         move |_, _| browser.open_selected_in_drive()
     ));
+    // A check item in the folder menu: on when the folder is one of the synced folders.
+    let sync_folder = gio::SimpleAction::new_stateful("sync-folder", None, &false.to_variant());
+    sync_folder.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, _| browser.toggle_sync_selected()
+    ));
     let sign_out = gio::SimpleAction::new("sign-out", None);
     sign_out.set_enabled(false);
     sign_out.connect_activate(glib::clone!(
@@ -273,6 +280,7 @@ fn install_actions(
         &upload,
         &download,
         &open_in_drive,
+        &sync_folder,
         &preferences,
     ] {
         window.add_action(action);
@@ -842,6 +850,15 @@ impl Browser {
         set_action_enabled(&window, "move", can.move_item);
         set_action_enabled(&window, "trash", can.trash);
         set_action_enabled(&window, "open-in-drive", selected.is_some());
+        let folder = selected.as_ref().filter(|entry| entry.is_folder());
+        set_action_enabled(&window, "sync-folder", folder.is_some());
+        if let Some(action) = window
+            .lookup_action("sync-folder")
+            .and_downcast::<gio::SimpleAction>()
+        {
+            let synced = folder.is_some_and(|f| self.synced_roots.borrow().contains(&f.id));
+            action.set_state(&synced.to_variant());
+        }
         set_action_enabled(
             &window,
             "download",
@@ -871,6 +888,9 @@ impl Browser {
         let menu = gio::Menu::new();
         menu.append(Some("Open in Google Drive"), Some("win.open-in-drive"));
         menu.append(Some("Download…"), Some("win.download"));
+        let sync = gio::Menu::new();
+        sync.append(Some("Keep in Sync"), Some("win.sync-folder"));
+        menu.append_section(None, &sync);
         let edit = gio::Menu::new();
         edit.append(Some("Rename…"), Some("win.rename"));
         edit.append(Some("Move to…"), Some("win.move"));
@@ -974,6 +994,49 @@ impl Browser {
         }
     }
 
+    /// Adds the selected folder to the synced folders, or takes it out. With sync not set
+    /// up yet, it starts in ~/Aerie when that's free; otherwise the Sync page asks where.
+    fn toggle_sync_selected(self: &Rc<Self>) {
+        let Some(folder) = self.selected().filter(FileEntry::is_folder) else {
+            return;
+        };
+        let (settings, mut roots, _) = self.sync_view();
+        let name = &folder.name;
+        if settings.is_some() {
+            let message = if let Some(at) = roots.iter().position(|id| *id == folder.id) {
+                roots.remove(at);
+                format!("Stopped syncing “{name}”. Its files stay on this computer.")
+            } else {
+                roots.push(folder.id.clone());
+                format!("“{name}” will stay in sync.")
+            };
+            self.engine.send(Command::SetSyncRoots(roots));
+            self.toast(adw::Toast::new(&message));
+            return;
+        }
+        let suggested =
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Aerie"));
+        match suggested.filter(|path| crate::sync_page::is_empty_or_missing(path)) {
+            Some(local_root) if std::fs::create_dir_all(&local_root).is_ok() => {
+                let shown = local_root.join(name);
+                self.engine.send(Command::StartSync {
+                    local_root,
+                    roots: vec![folder.id.clone()],
+                });
+                self.toast(adw::Toast::new(&format!(
+                    "Syncing “{name}” to {}",
+                    shown.to_string_lossy()
+                )));
+            }
+            _ => {
+                self.show_page("sync");
+                self.toast(adw::Toast::new(
+                    "Choose a folder on this computer to sync with first.",
+                ));
+            }
+        }
+    }
+
     /// Sync settings, chosen roots and top-level folders, for the sync page.
     fn sync_view(
         &self,
@@ -990,7 +1053,16 @@ impl Browser {
                     .map(|root| catalog.children(&root))
                     .unwrap_or_default();
                 folders.extend(catalog.shared_drives());
-                (catalog.sync_settings(), catalog.sync_roots(), folders)
+                let roots = catalog.sync_roots();
+                // Folders synced from deeper in the tree, through their menu.
+                for root in &roots {
+                    if !folders.iter().any(|folder| folder.id == *root)
+                        && let Some(entry) = catalog.get(root)
+                    {
+                        folders.push(entry);
+                    }
+                }
+                (catalog.sync_settings(), roots, folders)
             }
             AppCatalog::Samples(_) => (None, Vec::new(), Vec::new()),
         }
@@ -1056,10 +1128,20 @@ impl Browser {
     }
 
     fn show_transfers(&self) {
-        self.transfers_row.set_visible(true);
+        self.show_page("transfers");
+    }
+
+    /// Shows the Transfers or Sync page, selecting its row in the sidebar.
+    fn show_page(&self, page: &str) {
+        let row = if page == "sync" {
+            &self.sync_row
+        } else {
+            &self.transfers_row
+        };
+        row.set_visible(true);
         self.drives_list.unselect_all();
-        self.places.select_row(Some(&self.transfers_row));
-        self.pages.set_visible_child_name("transfers");
+        self.places.select_row(Some(row));
+        self.pages.set_visible_child_name(page);
     }
 
     fn toast(&self, toast: adw::Toast) {

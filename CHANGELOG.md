@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 beta
+
+- **Keep in Sync from the folder menu:** right-click any folder, at any depth, and check "Keep in Sync" to add it to your synced folders, or uncheck it to stop. If sync isn't set up yet, it starts in ~/Aerie.
+
 ## 0.4.0 beta
 
 A design pass to bring Aerie closer to its brand.
