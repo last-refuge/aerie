@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5 beta
+
+- **Sync progress:** while sync works, the sidebar and the Sync page show a progress bar, how many changes are done ("12 of 340 changes") and what's happening now ("Downloading report.pdf in Acme"). Progress updates several times a second instead of every 25 changes.
+
 ## 0.4.4 beta
 
 - **Drive's folder structure, kept:** a synced folder lands in the same place it has on Drive. Syncing "Acme" from My Drive › Clients puts it at `~/Aerie/My Drive/Clients/Acme`; a shared drive's folders go under the drive's name, and items shared with you under "Shared with me". Folders synced by earlier versions move into place on the first pass, without downloading anything again. The folders above a synced one only hold it; they aren't synced themselves.

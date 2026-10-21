@@ -24,6 +24,8 @@ pub struct SyncPage {
     chosen: RefCell<Option<PathBuf>>,
     // Running.
     status_row: adw::ActionRow,
+    /// How far the running pass is, shown only while one runs.
+    progress: gtk::ProgressBar,
     held_row: adw::ActionRow,
     local_row: adw::ActionRow,
     running_folders: adw::PreferencesGroup,
@@ -82,6 +84,13 @@ impl SyncPage {
             .label("Sync Now")
             .valign(gtk::Align::Center)
             .build();
+        let progress = gtk::ProgressBar::builder()
+            .valign(gtk::Align::Center)
+            .width_request(160)
+            .css_classes(["sync-bar"])
+            .visible(false)
+            .build();
+        status_row.add_suffix(&progress);
         status_row.add_suffix(&sync_now);
         let held_row = adw::ActionRow::builder()
             .title("Deletions paused")
@@ -149,6 +158,7 @@ impl SyncPage {
             start,
             chosen: RefCell::default(),
             status_row,
+            progress,
             held_row,
             local_row,
             running_folders,
@@ -320,6 +330,7 @@ impl SyncPage {
 
     pub fn set_state(&self, state: &SyncState) {
         self.held_row.set_visible(false);
+        self.progress.set_visible(false);
         let (title, subtitle) = match state {
             SyncState::Off => ("Sync is off", String::new()),
             SyncState::Paused => ("Paused", "Changes wait until you resume.".to_owned()),
@@ -341,14 +352,14 @@ impl SyncPage {
         self.status_row.set_subtitle(&subtitle);
     }
 
-    /// Shows where a running pass is working.
-    pub fn set_progress(&self, folder: Option<&str>, done: usize, total: usize) {
-        self.status_row.set_title("Syncing");
-        let step = format!("{} of {total}", done + 1);
-        self.status_row.set_subtitle(&match folder {
-            Some(folder) => format!("{folder} · {step}"),
-            None => step,
-        });
+    /// Shows how far a running pass is and what it's doing now.
+    pub fn set_progress(&self, progress: &Progress) {
+        self.status_row
+            .set_title(&format!("Syncing · {}", progress.count()));
+        self.status_row
+            .set_subtitle(&glib::markup_escape_text(&progress.doing()));
+        self.progress.set_fraction(progress.fraction());
+        self.progress.set_visible(true);
     }
 
     fn update_start(&self) {
@@ -415,5 +426,70 @@ pub(crate) fn is_empty_or_missing(path: &std::path::Path) -> bool {
     match std::fs::read_dir(path) {
         Ok(mut entries) => entries.next().is_none(),
         Err(err) => err.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
+/// Where a running sync pass is, as the app shows it.
+pub struct Progress {
+    pub done: usize,
+    pub total: usize,
+    pub verb: String,
+    pub item: Option<String>,
+    /// The synced folder it's working in, by name.
+    pub folder: Option<String>,
+}
+
+impl Progress {
+    pub fn fraction(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            (self.done as f64 / self.total as f64).clamp(0.0, 1.0)
+        }
+    }
+
+    /// "12 of 340 changes".
+    pub fn count(&self) -> String {
+        let change = if self.total == 1 { "change" } else { "changes" };
+        format!(
+            "{} of {} {change}",
+            (self.done + 1).min(self.total),
+            self.total
+        )
+    }
+
+    /// "Downloading report.pdf in Acme".
+    pub fn doing(&self) -> String {
+        let mut text = match &self.item {
+            Some(item) => format!("{} {item}", self.verb),
+            None => self.verb.clone(),
+        };
+        if let Some(folder) = self
+            .folder
+            .as_deref()
+            .filter(|f| Some(*f) != self.item.as_deref())
+        {
+            text.push_str(&format!(" in {folder}"));
+        }
+        text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn describes_progress() {
+        let progress = Progress {
+            done: 11,
+            total: 340,
+            verb: "Downloading".into(),
+            item: Some("report.pdf".into()),
+            folder: Some("Acme".into()),
+        };
+        assert_eq!(progress.count(), "12 of 340 changes");
+        assert_eq!(progress.doing(), "Downloading report.pdf in Acme");
+        assert!((progress.fraction() - 11.0 / 340.0).abs() < 1e-9);
     }
 }

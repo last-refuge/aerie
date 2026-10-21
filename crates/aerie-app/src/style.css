@@ -156,6 +156,18 @@ button {
   border-radius: 999px;
   background-image: var(--aerie-primary-gradient);
 }
+/* Sync progress: the same slim bar, filling as a pass works through its changes. */
+.sync-bar trough {
+  min-height: 6px;
+  border-radius: 999px;
+  background-color: alpha(currentColor, 0.1);
+}
+.sync-bar progress {
+  min-height: 6px;
+  border-radius: 999px;
+  background-image: var(--aerie-primary-gradient);
+}
+
 .storage-bar.nearly-full progress {
   background-image: none;
   background-color: #d97706;

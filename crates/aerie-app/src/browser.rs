@@ -108,17 +108,29 @@ pub fn build_window(app: &adw::Application) {
                         transfers.progress(id, done, total)
                     }
                     Event::TransfersChanged => {}
-                    Event::SyncProgress { root, done, total } => {
-                        let name = root
-                            .as_ref()
-                            .and_then(|id| browser.state.borrow().catalog().get(id))
-                            .map(|folder| folder.name);
-                        sync.set_progress(name.as_deref(), done, total);
+                    Event::SyncProgress {
+                        root,
+                        done,
+                        total,
+                        verb,
+                        item,
+                    } => {
+                        let folder = root.as_ref().and_then(|id| browser.folder_title(id));
+                        let progress = crate::sync_page::Progress {
+                            done,
+                            total,
+                            verb,
+                            item,
+                            folder,
+                        };
+                        sync.set_progress(&progress);
+                        browser.set_sync_progress(Some(&progress));
                         browser.set_sync_activity(root);
                     }
                     Event::Sync(state) => {
                         if state != crate::engine::SyncState::Syncing {
                             browser.set_sync_activity(None);
+                            browser.set_sync_progress(None);
                         }
                         sync.set_state(&state);
                         browser.set_sync_state(state);
@@ -611,6 +623,10 @@ struct Browser {
     status_icon: gtk::Image,
     status_title: gtk::Label,
     status_detail: gtk::Label,
+    /// While a pass runs: how far it is, and what it's doing.
+    sync_progress: gtk::Box,
+    sync_bar: gtk::ProgressBar,
+    sync_doing: gtk::Label,
     /// Storage use under the status: a bar in the brand gradient and "x of y".
     storage: gtk::Box,
     storage_bar: gtk::ProgressBar,
@@ -775,6 +791,19 @@ impl Browser {
             status_title: gtk::Label::builder()
                 .xalign(0.0)
                 .css_classes(["status-title"])
+                .build(),
+            sync_progress: gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(6)
+                .visible(false)
+                .build(),
+            sync_bar: gtk::ProgressBar::builder()
+                .css_classes(["sync-bar"])
+                .build(),
+            sync_doing: gtk::Label::builder()
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                .css_classes(["metadata"])
                 .build(),
             storage: gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
@@ -1502,7 +1531,10 @@ impl Browser {
             .css_classes(["sync-status", "card"])
             .accessible_role(gtk::AccessibleRole::Status)
             .build();
+        self.sync_progress.append(&self.sync_bar);
+        self.sync_progress.append(&self.sync_doing);
         status.append(&summary);
+        status.append(&self.sync_progress);
         status.append(&self.storage);
 
         self.drives_list.connect_row_activated(glib::clone!(
@@ -1587,6 +1619,31 @@ impl Browser {
         // The cached drives show at once; the engine reports changes only when there are some.
         self.refresh_drives();
         self.show_state();
+    }
+
+    /// Shows how far a running sync pass is, in the status card; `None` hides it.
+    fn set_sync_progress(&self, progress: Option<&crate::sync_page::Progress>) {
+        let Some(progress) = progress else {
+            self.sync_progress.set_visible(false);
+            return;
+        };
+        self.sync_bar.set_fraction(progress.fraction());
+        self.sync_doing.set_label(&progress.doing());
+        self.sync_doing.set_tooltip_text(Some(&progress.doing()));
+        self.status_detail.set_label(&progress.count());
+        self.sync_progress.set_visible(true);
+    }
+
+    /// A synced folder's name, including My Drive and shared drives.
+    fn folder_title(&self, id: &DriveFileId) -> Option<String> {
+        let state = self.state.borrow();
+        match state.catalog() {
+            AppCatalog::Drive(catalog) => catalog
+                .get(id)
+                .or_else(|| catalog.my_drive().filter(|entry| entry.id == *id))
+                .map(|entry| entry.name),
+            AppCatalog::Samples(_) => None,
+        }
     }
 
     /// Shows storage use; `None` hides it.

@@ -28,6 +28,10 @@ pub struct Progress {
     pub root: Option<aerie_core::DriveFileId>,
     pub done: usize,
     pub total: usize,
+    /// What the step about to run does, such as "Downloading".
+    pub verb: &'static str,
+    /// The name of the file or folder it works on, when it has one.
+    pub item: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -127,6 +131,11 @@ pub async fn run(
             root: working_in,
             done,
             total,
+            verb: op.verb(),
+            item: op
+                .path()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned()),
         });
         match executor.run(op).await {
             Ok(Done::Applied) => report.applied += 1,

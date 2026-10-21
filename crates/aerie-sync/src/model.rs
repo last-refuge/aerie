@@ -115,6 +115,19 @@ pub enum Op {
 }
 
 impl Op {
+    /// What the step does, for progress shown to the user.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Self::CreateLocalDir { .. } | Self::CreateRemoteDir { .. } => "Creating",
+            Self::Download { .. } => "Downloading",
+            Self::UploadNew { .. } | Self::UploadReplace { .. } => "Uploading",
+            Self::MoveLocal { .. } | Self::MoveRemote { .. } => "Moving",
+            Self::TrashLocal { .. } | Self::TrashRemote { .. } => "Moving to trash",
+            Self::Conflict { .. } => "Keeping both versions of",
+            Self::Forget { .. } => "Tidying up",
+        }
+    }
+
     pub fn is_deletion(&self) -> bool {
         matches!(self, Self::TrashLocal { .. } | Self::TrashRemote { .. })
     }
