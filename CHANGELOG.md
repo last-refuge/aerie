@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7 beta
+
+- **Sync badges in the sidebar:** My Drive and shared drives that sync as a whole show the same badge as synced folders: a cloud with a check, turning while they sync.
+
 ## 0.4.6 beta
 
 - **No false sign-in prompt after updating:** while Aerie waits for its background service (which takes a few seconds after an update replaces the old one), it shows "Starting Aerie" instead of asking you to connect Google Drive.

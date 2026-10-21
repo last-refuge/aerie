@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.4.7" date="2026-10-21">
+      <description>
+        <p>Synced drives show a badge in the sidebar.</p>
+      </description>
+    </release>
     <release version="0.4.6" date="2026-10-21">
       <description>
         <p>Shows "Starting Aerie" while the background service starts, instead of asking to connect.</p>

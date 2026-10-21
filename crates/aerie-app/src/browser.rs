@@ -628,6 +628,9 @@ struct Browser {
     /// Shown under the heading until the first index has found the shared drives.
     drives_loading: gtk::Box,
     drives_list: gtk::ListBox,
+    /// Synced badges in the sidebar, for My Drive and each shared drive.
+    my_drive_badge: gtk::Image,
+    drive_badges: RefCell<Vec<(DriveFileId, gtk::Image)>>,
     drives: RefCell<Vec<FileEntry>>,
     places: gtk::ListBox,
     /// The content area: the file list, or the transfer list.
@@ -783,6 +786,8 @@ impl Browser {
                 .css_classes(["navigation-sidebar"])
                 .build(),
             drives: RefCell::default(),
+            my_drive_badge: sidebar_badge(),
+            drive_badges: RefCell::default(),
             places: gtk::ListBox::builder()
                 .css_classes(["navigation-sidebar"])
                 .build(),
@@ -1525,7 +1530,13 @@ impl Browser {
 
     fn sidebar(self: &Rc<Self>) -> gtk::Widget {
         let places = &self.places;
-        places.append(&sidebar_row("aerie-folder-symbolic", "My Drive"));
+        let my_drive = sidebar_row("aerie-folder-symbolic", "My Drive");
+        if let Some(row) = my_drive.child().and_downcast::<gtk::Box>() {
+            // Pushed to the row's end, as in the shared drive rows.
+            self.my_drive_badge.set_hexpand(true);
+            row.append(&self.my_drive_badge);
+        }
+        places.append(&my_drive);
         places.append(&self.transfers_row);
         places.append(&self.sync_row);
         self.transfers_row.set_visible(false);
@@ -1778,6 +1789,7 @@ impl Browser {
         while let Some(row) = self.drives_list.first_child() {
             self.drives_list.remove(&row);
         }
+        self.drive_badges.borrow_mut().clear();
         for drive in &drives {
             self.drives_list
                 .append(&self.drive_row(drive, is_pinned(drive)));
@@ -2001,6 +2013,11 @@ impl Browser {
                 browser.refresh_drives();
             }
         ));
+        let badge = sidebar_badge();
+        row.append(&badge);
+        self.drive_badges
+            .borrow_mut()
+            .push((drive.id.clone(), badge));
         row.append(&pin);
         gtk::ListBoxRow::builder().child(&row).build()
     }
@@ -2181,6 +2198,28 @@ impl Browser {
     }
 
     /// Marks the synced folder a pass is working in, or none.
+    /// Badges My Drive and the shared drives in the sidebar that sync as a whole.
+    fn update_sidebar_marks(&self) {
+        let roots = self.synced_roots.borrow();
+        let active = self.active_root.borrow();
+        let mark = |id: &DriveFileId| match (roots.contains(id), active.as_ref() == Some(id)) {
+            (false, _) => SyncMark::None,
+            (true, true) => SyncMark::Syncing,
+            (true, false) => SyncMark::Synced,
+        };
+        let my_drive = match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog.root(),
+            AppCatalog::Samples(_) => None,
+        };
+        show_mark(
+            &self.my_drive_badge,
+            my_drive.as_ref().map_or(SyncMark::None, mark),
+        );
+        for (id, badge) in self.drive_badges.borrow().iter() {
+            show_mark(badge, mark(id));
+        }
+    }
+
     fn set_sync_activity(self: &Rc<Self>, root: Option<DriveFileId>) {
         if *self.active_root.borrow() != root {
             self.active_root.replace(root);
@@ -2276,6 +2315,7 @@ impl Browser {
         }
         self.rebuild_breadcrumbs(searching);
         self.update_actions();
+        self.update_sidebar_marks();
     }
 
     /// Swaps in new rows, touching only the run that changed. The list refreshes after
@@ -2616,6 +2656,15 @@ fn entry_of(object: &glib::Object) -> std::cell::Ref<'_, FileEntry> {
 
 /// The badge beside a synced folder: a gently turning arrow while syncing, a cloud with a
 /// check otherwise.
+fn sidebar_badge() -> gtk::Image {
+    gtk::Image::builder()
+        .css_classes(["sync-badge"])
+        .pixel_size(14)
+        .halign(gtk::Align::End)
+        .visible(false)
+        .build()
+}
+
 fn show_mark(badge: &gtk::Image, mark: SyncMark) {
     badge.set_visible(mark != SyncMark::None);
     match mark {
