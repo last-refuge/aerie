@@ -1,7 +1,7 @@
 //! Running sync passes: when to start one, watching the local folder, and reporting.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use aerie_core::DriveFileId;
 use aerie_store::{Store, SyncSettings};
@@ -226,8 +226,9 @@ impl Worker {
             let result = async {
                 let mut store = Store::open(&Store::default_path()).map_err(io)?;
                 let quarantine = quarantine_dir();
-                // Report each change of folder, not every step.
+                // Often enough for a smooth bar, not on every step of a large pass.
                 let mut last_root = None;
+                let mut last_sent: Option<Instant> = None;
                 cycle::run(
                     &drive,
                     &mut store,
@@ -236,12 +237,17 @@ impl Worker {
                     &quarantine,
                     deletions,
                     |progress| {
-                        if progress.root != last_root || progress.done % 25 == 0 {
+                        let due =
+                            last_sent.is_none_or(|at| at.elapsed() >= Duration::from_millis(200));
+                        if progress.root != last_root || due {
                             last_root.clone_from(&progress.root);
+                            last_sent = Some(Instant::now());
                             let _ = events.try_send(Event::SyncProgress {
                                 root: progress.root,
                                 done: progress.done,
                                 total: progress.total,
+                                verb: progress.verb.to_owned(),
+                                item: progress.item,
                             });
                         }
                     },

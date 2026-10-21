@@ -156,6 +156,9 @@ pub enum Event {
         root: Option<DriveFileId>,
         done: usize,
         total: usize,
+        /// What the current step does ("Downloading") and the name it works on.
+        verb: String,
+        item: Option<String>,
     },
     /// Both versions of a file were kept; this is the path of Drive's copy.
     ConflictKept(PathBuf),
