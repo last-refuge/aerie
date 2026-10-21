@@ -38,11 +38,43 @@ impl Worker {
         Some((account, settings))
     }
 
+    /// Drops chosen folders that sit inside another chosen folder: they already sync as
+    /// part of it, and syncing them twice would copy their files twice.
+    fn outermost(&mut self, account: &str, roots: Vec<DriveFileId>) -> Vec<DriveFileId> {
+        let chosen: std::collections::HashSet<_> = roots.iter().cloned().collect();
+        let store = self.store();
+        roots
+            .into_iter()
+            .filter(|root| {
+                let mut current = store
+                    .file(account, root)
+                    .ok()
+                    .flatten()
+                    .and_then(|e| e.parent);
+                // Bounded, so a cycle in bad metadata can't hang the engine.
+                for _ in 0..256 {
+                    match current {
+                        Some(parent) if chosen.contains(&parent) => return false,
+                        Some(parent) => {
+                            current = store
+                                .file(account, &parent)
+                                .ok()
+                                .flatten()
+                                .and_then(|e| e.parent);
+                        }
+                        None => return true,
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
     /// The local folder name each chosen Drive folder syncs to.
     fn root_paths(&mut self, account: &str, roots: &[DriveFileId]) -> Vec<PathBuf> {
         roots
             .iter()
-            .filter_map(|id| self.store().file(account, id).ok().flatten())
+            .filter_map(|id| self.store().sync_root_entry(account, id).ok().flatten())
             .map(|entry| PathBuf::from(aerie_sync::tree::local_name(&entry.name)))
             .collect()
     }
@@ -59,6 +91,7 @@ impl Worker {
                 "The folder you chose isn't available.".into(),
             )));
         }
+        let roots = self.outermost(&account, roots);
         let paths = self.root_paths(&account, &roots);
         let settings = SyncSettings {
             local_root,
@@ -81,6 +114,7 @@ impl Worker {
         let Some((account, _)) = self.sync_settings() else {
             return;
         };
+        let roots = self.outermost(&account, roots);
         let paths = self.root_paths(&account, &roots);
         if let Err(err) = self.store().set_sync_roots(&account, &roots, &paths) {
             return self.emit(Event::Problem(err.to_string()));

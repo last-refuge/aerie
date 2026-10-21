@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 beta
+
+- **Sync whole drives:** keep all of My Drive, or an entire shared drive, in sync. Right-click My Drive or a shared drive in the sidebar and choose "Keep in Sync", or switch it on in the Sync page. My Drive syncs to a "My Drive" folder; each shared drive to a folder named after it. A folder inside one that already syncs isn't synced twice.
+
 ## 0.4.1 beta
 
 - **Keep in Sync from the folder menu:** right-click any folder, at any depth, and check "Keep in Sync" to add it to your synced folders, or uncheck it to stop. If sync isn't set up yet, it starts in ~/Aerie.

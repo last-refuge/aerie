@@ -345,3 +345,18 @@ fn an_unfinished_inventory_remembers_where_it_stopped() {
         .unwrap();
     assert_eq!(store.inventory_resume(ACCOUNT).unwrap(), None);
 }
+
+#[test]
+fn my_drive_can_be_a_sync_root() {
+    let store = inventoried(&[]);
+    let root = DriveFileId::new("root");
+    let entry = store.sync_root_entry(ACCOUNT, &root).unwrap().unwrap();
+    assert_eq!(entry.name, MY_DRIVE);
+    assert!(entry.is_folder());
+    assert!(
+        store
+            .sync_root_entry(ACCOUNT, &DriveFileId::new("nowhere"))
+            .unwrap()
+            .is_none()
+    );
+}

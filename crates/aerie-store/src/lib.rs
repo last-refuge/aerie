@@ -44,6 +44,9 @@ pub struct Indexing {
     pub drives: Vec<DriveFileId>,
 }
 
+/// The name My Drive syncs under on this computer.
+pub const MY_DRIVE: &str = "My Drive";
+
 pub struct Store {
     conn: Connection,
 }
@@ -208,6 +211,34 @@ impl Store {
             )
             .optional()?
             .unwrap_or(false))
+    }
+
+    /// A folder chosen for sync. My Drive itself isn't listed as a file, so it gets a
+    /// stand-in entry named "My Drive".
+    pub fn sync_root_entry(&self, account: &str, id: &DriveFileId) -> Result<Option<FileEntry>> {
+        if let Some(entry) = self.file(account, id)? {
+            return Ok(Some(entry));
+        }
+        if self.root_id(account)?.as_ref() != Some(id) {
+            return Ok(None);
+        }
+        Ok(Some(FileEntry {
+            id: id.clone(),
+            parent: None,
+            name: MY_DRIVE.to_owned(),
+            kind: aerie_core::FileKind::Folder,
+            size: None,
+            modified: 0,
+            mime_type: "application/vnd.google-apps.folder".to_owned(),
+            md5: None,
+            head_revision: None,
+            drive: None,
+            can: aerie_core::Capabilities {
+                add_children: true,
+                download: true,
+                ..aerie_core::Capabilities::default()
+            },
+        }))
     }
 
     pub fn root_id(&self, account: &str) -> Result<Option<DriveFileId>> {

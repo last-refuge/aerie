@@ -254,6 +254,16 @@ fn install_actions(
         browser,
         move |_, _| browser.toggle_sync_selected()
     ));
+    let sync_root = gio::SimpleAction::new("sync-root", Some(glib::VariantTy::STRING));
+    sync_root.connect_activate(glib::clone!(
+        #[strong]
+        browser,
+        move |_, id| {
+            if let Some(id) = id.and_then(|id| id.str()) {
+                browser.toggle_sync_root_by_id(id);
+            }
+        }
+    ));
     let sign_out = gio::SimpleAction::new("sign-out", None);
     sign_out.set_enabled(false);
     sign_out.connect_activate(glib::clone!(
@@ -281,6 +291,7 @@ fn install_actions(
         &download,
         &open_in_drive,
         &sync_folder,
+        &sync_root,
         &preferences,
     ] {
         window.add_action(action);
@@ -994,19 +1005,30 @@ impl Browser {
         }
     }
 
-    /// Adds the selected folder to the synced folders, or takes it out. With sync not set
-    /// up yet, it starts in ~/Aerie when that's free; otherwise the Sync page asks where.
     fn toggle_sync_selected(self: &Rc<Self>) {
-        let Some(folder) = self.selected().filter(FileEntry::is_folder) else {
-            return;
-        };
+        if let Some(folder) = self.selected().filter(FileEntry::is_folder) {
+            self.toggle_sync_root(folder);
+        }
+    }
+
+    /// Adds a folder (or all of My Drive, or a shared drive) to the synced folders, or
+    /// takes it out. With sync not set up yet, it starts in ~/Aerie when that's free;
+    /// otherwise the Sync page asks where.
+    fn toggle_sync_root(self: &Rc<Self>, folder: FileEntry) {
         let (settings, mut roots, _) = self.sync_view();
         let name = &folder.name;
         if settings.is_some() {
             let message = if let Some(at) = roots.iter().position(|id| *id == folder.id) {
                 roots.remove(at);
                 format!("Stopped syncing “{name}”. Its files stay on this computer.")
+            } else if let Some(outer) = roots.iter().find(|root| self.is_inside(&folder.id, root)) {
+                let outer = self.folder_name(outer);
+                return self.toast(adw::Toast::new(&format!(
+                    "“{name}” already syncs as part of “{outer}”."
+                )));
             } else {
+                // Folders inside this one now sync as part of it, not on their own.
+                roots.retain(|root| !self.is_inside(root, &folder.id));
                 roots.push(folder.id.clone());
                 format!("“{name}” will stay in sync.")
             };
@@ -1037,6 +1059,30 @@ impl Browser {
         }
     }
 
+    /// Whether `id` is somewhere inside the folder `outer`.
+    fn is_inside(&self, id: &DriveFileId, outer: &DriveFileId) -> bool {
+        let state = self.state.borrow();
+        let catalog = state.catalog();
+        let mut current = catalog.get(id).and_then(|entry| entry.parent);
+        // Bounded, so a cycle in bad metadata can't hang the app.
+        for _ in 0..256 {
+            match current {
+                Some(parent) if parent == *outer => return true,
+                Some(parent) => current = catalog.get(&parent).and_then(|entry| entry.parent),
+                None => return false,
+            }
+        }
+        false
+    }
+
+    fn folder_name(&self, id: &DriveFileId) -> String {
+        let (_, _, folders) = self.sync_view();
+        folders
+            .into_iter()
+            .find(|folder| folder.id == *id)
+            .map_or_else(|| "another synced folder".to_owned(), |folder| folder.name)
+    }
+
     /// Sync settings, chosen roots and top-level folders, for the sync page.
     fn sync_view(
         &self,
@@ -1048,10 +1094,14 @@ impl Browser {
         let state = self.state.borrow();
         match state.catalog() {
             AppCatalog::Drive(catalog) => {
-                let mut folders = catalog
-                    .root()
-                    .map(|root| catalog.children(&root))
-                    .unwrap_or_default();
+                // All of My Drive first, then its top-level folders and the shared drives.
+                let mut folders: Vec<FileEntry> = catalog.my_drive().into_iter().collect();
+                folders.extend(
+                    catalog
+                        .root()
+                        .map(|root| catalog.children(&root))
+                        .unwrap_or_default(),
+                );
                 folders.extend(catalog.shared_drives());
                 let roots = catalog.sync_roots();
                 // Folders synced from deeper in the tree, through their menu.
@@ -1406,6 +1456,7 @@ impl Browser {
             }
         ));
         self.install_drive_section();
+        self.install_sidebar_menu();
         let lists = gtk::Box::new(gtk::Orientation::Vertical, 6);
         lists.append(places);
         lists.append(&self.drives_header);
@@ -1593,6 +1644,93 @@ impl Browser {
             }
         }
         *self.drives.borrow_mut() = drives;
+    }
+
+    /// Right-clicking My Drive or a shared drive in the sidebar offers to keep all of it
+    /// in sync, or to stop.
+    fn install_sidebar_menu(self: &Rc<Self>) {
+        for list in [&self.places, &self.drives_list] {
+            let click = gtk::GestureClick::builder()
+                .button(gtk::gdk::BUTTON_SECONDARY)
+                .build();
+            let is_drives = list == &self.drives_list;
+            click.connect_pressed(glib::clone!(
+                #[weak(rename_to = browser)]
+                self,
+                #[weak]
+                list,
+                move |gesture, _, x, y| {
+                    let Some(row) = list.row_at_y(y as i32) else {
+                        return;
+                    };
+                    let target = if is_drives {
+                        browser.drives.borrow().get(row.index() as usize).cloned()
+                    } else if row.index() == 0 {
+                        match browser.state.borrow().catalog() {
+                            AppCatalog::Drive(catalog) => catalog.my_drive(),
+                            AppCatalog::Samples(_) => None,
+                        }
+                    } else {
+                        None
+                    };
+                    let Some(target) = target else { return };
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    browser.show_sync_menu(&list, target, x, y);
+                }
+            ));
+            list.add_controller(click);
+        }
+    }
+
+    fn show_sync_menu(self: &Rc<Self>, parent: &gtk::ListBox, target: FileEntry, x: f64, y: f64) {
+        let synced = self.sync_view().1.contains(&target.id);
+        let menu = gio::Menu::new();
+        let item = gio::MenuItem::new(
+            Some(if synced {
+                "Stop Syncing"
+            } else {
+                "Keep in Sync"
+            }),
+            None,
+        );
+        item.set_action_and_target_value(
+            Some("win.sync-root"),
+            Some(&target.id.as_str().to_variant()),
+        );
+        menu.append_item(&item);
+        let popover = gtk::PopoverMenu::builder()
+            .menu_model(&menu)
+            .has_arrow(false)
+            .halign(gtk::Align::Start)
+            .build();
+        popover.set_parent(parent);
+        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        popover.connect_closed(|popover| {
+            let popover = popover.clone();
+            // Unparent after the menu's action has run.
+            glib::idle_add_local_once(move || popover.unparent());
+        });
+        popover.popup();
+    }
+
+    /// The sidebar menu's target: My Drive or a shared drive, by ID.
+    fn toggle_sync_root_by_id(self: &Rc<Self>, id: &str) {
+        let target = match self.state.borrow().catalog() {
+            AppCatalog::Drive(catalog) => catalog
+                .my_drive()
+                .filter(|entry| entry.id.as_str() == id)
+                .or_else(|| {
+                    self.drives
+                        .borrow()
+                        .iter()
+                        .find(|drive| drive.id.as_str() == id)
+                        .cloned()
+                }),
+            AppCatalog::Samples(_) => None,
+        };
+        if let Some(target) = target {
+            self.toggle_sync_root(target);
+        }
     }
 
     /// Wires the shared drives heading (fold and unfold), the filter and the list's order.

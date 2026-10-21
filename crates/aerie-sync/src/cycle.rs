@@ -66,7 +66,7 @@ pub async fn run(
         .sync_roots(account)
         .map_err(store_error)?
         .iter()
-        .filter_map(|id| store.file(account, id).ok().flatten())
+        .filter_map(|id| store.sync_root_entry(account, id).ok().flatten())
         .collect();
     let remote = tree::remote_items(&roots, &|folder| {
         store.children(account, folder).unwrap_or_default()

@@ -282,7 +282,9 @@ impl SyncPage {
             let row = adw::SwitchRow::builder()
                 .title(glib::markup_escape_text(&folder.name).as_str())
                 .subtitle(if folder.mime_type == aerie_drive::api::SHARED_DRIVE_MIME {
-                    "Shared drive"
+                    "Everything in this shared drive"
+                } else if folder.parent.is_none() {
+                    "Everything in My Drive"
                 } else {
                     ""
                 })
