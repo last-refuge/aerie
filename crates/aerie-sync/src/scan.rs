@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use crate::model::LocalItem;
 
-/// Names Aerie never syncs: its own partial downloads and common editor temporaries.
+/// Names Aerie never syncs, in either direction: its own partial downloads, common
+/// editor temporaries, and the folder metadata macOS and Windows scatter about. Copies
+/// of `.DS_Store` ("…(conflicted copy …)", "… (2)") are junk too.
 pub fn is_ignored(name: &str) -> bool {
     name.ends_with(".aerie-partial")
         || name.starts_with(".~lock.")
@@ -15,7 +17,10 @@ pub fn is_ignored(name: &str) -> bool {
         || name.starts_with(".goutputstream-")
         || name.ends_with(".swp")
         || name.ends_with('~')
-        || name == ".DS_Store"
+        || name.starts_with(".DS_Store")
+        || name.starts_with("._")
+        || name.eq_ignore_ascii_case("Thumbs.db")
+        || name.eq_ignore_ascii_case("desktop.ini")
 }
 
 /// Lists everything under `root` relative to it, skipping symbolic links (which aren't

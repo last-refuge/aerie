@@ -8,9 +8,14 @@ use aerie_core::{DriveFileId, FileEntry};
 
 use crate::model::{ContentId, RemoteItem};
 
-/// Whether an item takes part in sync. Google-native documents stay browser-only, and
-/// shortcuts aren't followed.
+/// Whether an item takes part in sync. Google-native documents stay browser-only,
+/// shortcuts aren't followed, and names the local scan ignores (such as macOS's
+/// `.DS_Store`) are left on Drive: syncing one down would make a file the next scan
+/// can't see, which then looks like a conflict every pass.
 pub fn is_syncable(entry: &FileEntry) -> bool {
+    if crate::scan::is_ignored(&local_name(&entry.name)) {
+        return false;
+    }
     entry.is_folder() || !entry.mime_type.starts_with("application/vnd.google-apps.")
 }
 
@@ -215,6 +220,39 @@ mod tests {
         assert_eq!(local_name("a/b"), "a∕b");
         assert_eq!(numbered("report.final.pdf", 2), "report.final (2).pdf");
         assert_eq!(numbered(".hidden", 3), ".hidden (3)");
+    }
+}
+
+#[cfg(test)]
+mod syncable_tests {
+    use super::*;
+
+    #[test]
+    fn system_junk_stays_on_drive() {
+        let file = |name: &str| FileEntry {
+            id: DriveFileId::new(name),
+            parent: None,
+            name: name.to_owned(),
+            kind: aerie_core::FileKind::Other,
+            size: Some(1),
+            modified: 0,
+            mime_type: "application/octet-stream".to_owned(),
+            md5: None,
+            head_revision: None,
+            drive: None,
+            can: aerie_core::Capabilities::default(),
+        };
+        for junk in [
+            ".DS_Store",
+            ".DS_Store (conflicted copy from Drive 2026-10-22 952)",
+            "._Report.pdf",
+            "Thumbs.db",
+            "desktop.ini",
+        ] {
+            assert!(!is_syncable(&file(junk)), "{junk}");
+        }
+        assert!(is_syncable(&file("Report.pdf")));
+        assert!(is_syncable(&file(".env")));
     }
 }
 
