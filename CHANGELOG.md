@@ -1,8 +1,12 @@
 # Changelog
 
+## 0.5.3 beta
+
+- **Click the pause badge to resume:** while sync is paused, clicking the pause badge on the sidebar's status card resumes it. The Resume button added in 0.5.2 is gone.
+
 ## 0.5.2 beta
 
-- **Resume from the sidebar:** while sync is paused, the status card has a Resume button. "Sync Now" also resumes a paused sync instead of doing nothing.
+- **Resume from Sync Now:** "Sync Now" resumes a paused sync instead of doing nothing.
 
 ## 0.5.1 beta
 

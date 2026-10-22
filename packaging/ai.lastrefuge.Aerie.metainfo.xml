@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.5.3" date="2026-10-22">
+      <description>
+        <p>Click the pause badge in the sidebar to resume syncing.</p>
+      </description>
+    </release>
     <release version="0.5.2" date="2026-10-22">
       <description>
         <p>Resume a paused sync from the sidebar, or with Sync Now.</p>
