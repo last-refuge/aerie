@@ -144,6 +144,10 @@ button {
 .status-badge.working { --aerie-tone: var(--accent-color); }
 .status-badge.warning { --aerie-tone: #d97706; }
 .status-badge.off { --aerie-tone: var(--aerie-secondary-fg-color); }
+.status-badge.paused:hover {
+  background-color: color-mix(in srgb, var(--accent-color) 22%, transparent);
+  color: var(--accent-color);
+}
 
 /* Storage use: a slim bar in the signature gradient, amber when nearly full. */
 .storage-bar trough {

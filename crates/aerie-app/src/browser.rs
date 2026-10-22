@@ -670,8 +670,6 @@ struct Browser {
     status_icon: gtk::Image,
     status_title: gtk::Label,
     status_detail: gtk::Label,
-    /// Shown on the status card while sync is paused.
-    resume: gtk::Button,
     /// While a pass runs: how far it is, and what it's doing.
     sync_progress: gtk::Box,
     sync_bar: gtk::ProgressBar,
@@ -852,12 +850,6 @@ impl Browser {
             status_title: gtk::Label::builder()
                 .xalign(0.0)
                 .css_classes(["status-title"])
-                .build(),
-            resume: gtk::Button::builder()
-                .label("Resume")
-                .valign(gtk::Align::Center)
-                .css_classes(["pill", "small", "resume"])
-                .visible(false)
                 .build(),
             sync_progress: gtk::Box::builder()
                 .orientation(gtk::Orientation::Vertical)
@@ -1601,14 +1593,20 @@ impl Browser {
         text.append(&self.status_detail);
         let summary = gtk::Box::builder().spacing(12).build();
         summary.append(&self.status_icon);
-        text.set_hexpand(true);
         summary.append(&text);
-        summary.append(&self.resume);
-        self.resume.connect_clicked(glib::clone!(
+        // While paused, the pause badge itself resumes sync.
+        let resume = gtk::GestureClick::new();
+        resume.connect_pressed(glib::clone!(
             #[weak(rename_to = browser)]
             self,
-            move |_| browser.engine.send(Command::ResumeSync)
+            move |gesture, _, _, _| {
+                if browser.status_icon.has_css_class("paused") {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    browser.engine.send(Command::ResumeSync);
+                }
+            }
         ));
+        self.status_icon.add_controller(resume);
         self.storage.append(&self.storage_bar);
         self.storage.append(&self.storage_label);
         let status = gtk::Box::builder()
@@ -2219,7 +2217,15 @@ impl Browser {
                 self.sync_state.borrow().as_ref(),
                 Some(crate::engine::SyncState::Paused)
             );
-        self.resume.set_visible(paused);
+        if paused {
+            self.status_icon.add_css_class("paused");
+            self.status_icon.set_tooltip_text(Some("Resume syncing"));
+            self.status_icon
+                .set_cursor(gtk::gdk::Cursor::from_name("pointer", None).as_ref());
+        } else {
+            self.status_icon.set_tooltip_text(None);
+            self.status_icon.set_cursor(None);
+        }
         // The account shows on hover; the card itself says how things stand.
         let account = (!email.is_empty()).then_some(email.as_str());
         self.status_title.set_tooltip_text(account);
