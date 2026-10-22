@@ -55,8 +55,39 @@ impl Report {
     }
 }
 
+/// A step of a pass, as the activity log records it.
+#[derive(Clone, Debug)]
+pub enum Step {
+    /// The pass's steps, in the order they'll run.
+    Planned(Vec<PlannedStep>),
+    /// Step `index` started.
+    Started(usize),
+    /// Step `index` finished.
+    Finished(usize, Outcome),
+}
+
+#[derive(Clone, Debug)]
+pub struct PlannedStep {
+    pub verb: &'static str,
+    pub direction: crate::model::Direction,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub enum Outcome {
+    Done,
+    /// Both versions were kept; this is where the other copy went.
+    KeptBoth(PathBuf),
+    Skipped(String),
+    Failed(String),
+}
+
 /// Runs one pass. Errors that affect the whole pass (no root folder, unreadable folder)
-/// return early before anything changes.
+/// return early before anything changes. `log` follows each step for the activity view.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "two observers beside the pass's inputs"
+)]
 pub async fn run(
     drive: &DriveApi,
     store: &mut Store,
@@ -65,6 +96,7 @@ pub async fn run(
     quarantine: &Path,
     deletions: Deletions,
     mut progress: impl FnMut(Progress),
+    mut log: impl FnMut(Step),
 ) -> Result<Report> {
     let ids = store.sync_roots(account).map_err(store_error)?;
     let roots = root_locations(store, account, &ids);
@@ -120,7 +152,17 @@ pub async fn run(
         .collect();
     root_paths.sort_by_key(|(path, _)| std::cmp::Reverse(path.components().count()));
     let total = ops.len();
+    log(Step::Planned(
+        ops.iter()
+            .map(|op| PlannedStep {
+                verb: op.verb(),
+                direction: op.direction(),
+                path: op.path().cloned().unwrap_or_default(),
+            })
+            .collect(),
+    ));
     for (done, op) in ops.iter().enumerate() {
+        log(Step::Started(done));
         let working_in = op.path().and_then(|path| {
             root_paths
                 .iter()
@@ -138,13 +180,18 @@ pub async fn run(
                 .map(|name| name.to_string_lossy().into_owned()),
         });
         match executor.run(op).await {
-            Ok(Done::Applied) => report.applied += 1,
+            Ok(Done::Applied) => {
+                report.applied += 1;
+                log(Step::Finished(done, Outcome::Done));
+            }
             Ok(Done::ConflictCopy(copy)) => {
                 report.applied += 1;
+                log(Step::Finished(done, Outcome::KeptBoth(copy.clone())));
                 report.conflicts.push(copy);
             }
             Ok(Done::Skipped(reason)) => {
                 report.applied += 1;
+                log(Step::Finished(done, Outcome::Skipped(reason.to_string())));
                 report
                     .skipped
                     .push((op.path().cloned().unwrap_or_default(), reason));
@@ -155,6 +202,7 @@ pub async fn run(
                     return Err(err);
                 }
                 tracing::warn!(%err, "sync step failed");
+                log(Step::Finished(done, Outcome::Failed(err.to_string())));
                 report.failed.push((op.path().cloned(), err.to_string()));
             }
         }

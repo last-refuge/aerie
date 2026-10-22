@@ -328,3 +328,54 @@ row:hover .drive-pin,
 .sidebar-resize:hover {
   box-shadow: inset -2px 0 var(--accent-color);
 }
+
+/* Sync activity */
+
+.sync-status.activatable {
+  transition: background-color 120ms ease-out;
+}
+.sync-status.activatable:hover {
+  background-color: color-mix(in srgb, var(--accent-color) 8%, var(--card-bg-color));
+}
+
+.activity-summary {
+  padding: 18px 20px;
+}
+.activity-title {
+  font-size: 22px;
+  font-weight: 600;
+}
+.activity-count {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--aerie-secondary-fg-color);
+  background-color: alpha(currentColor, 0.08);
+}
+
+/* Which way a change goes, as a tinted tile like the file list's. */
+.activity-way {
+  padding: 6px;
+  border-radius: 8px;
+  color: var(--aerie-way);
+  background-color: color-mix(in srgb, var(--aerie-way) 14%, transparent);
+}
+.activity-way.way-down { --aerie-way: #0284c7; }
+.activity-way.way-up { --aerie-way: #7c3aed; }
+.activity-way.way-trash { --aerie-way: #dc2626; }
+.activity-way.way-both { --aerie-way: #d97706; }
+
+.activity-state {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+.activity-state.waiting {
+  color: var(--aerie-secondary-fg-color);
+  background-color: alpha(currentColor, 0.08);
+}
+.activity-state.kept { color: #b45309; background-color: alpha(#d97706, 0.14); }
+.activity-state.skipped { color: var(--aerie-secondary-fg-color); background-color: alpha(#94a3b8, 0.14); }
+.activity-state.failed { color: #b91c1c; background-color: alpha(#dc2626, 0.14); }
+.activity-done { color: #16a34a; }

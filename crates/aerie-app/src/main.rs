@@ -1,6 +1,7 @@
 //! Aerie desktop application.
 
 mod actions;
+mod activity_page;
 mod app_menu;
 mod browser;
 mod catalog;

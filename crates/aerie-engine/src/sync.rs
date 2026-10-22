@@ -228,8 +228,10 @@ impl Worker {
                 let quarantine = quarantine_dir();
                 // Often enough for a smooth bar, not on every step of a large pass.
                 let mut last_root = None;
+                let mut recorder = crate::activity::Recorder::new(crate::unix_now());
+                let log_events = events.clone();
                 let mut last_sent: Option<Instant> = None;
-                cycle::run(
+                let result = cycle::run(
                     &drive,
                     &mut store,
                     &account,
@@ -251,8 +253,17 @@ impl Worker {
                             });
                         }
                     },
+                    |step| {
+                        if let Some(activity) = recorder.record(step) {
+                            let _ = log_events.try_send(Event::SyncActivity(activity));
+                        }
+                    },
                 )
-                .await
+                .await;
+                if let Some(activity) = recorder.finish() {
+                    let _ = events.try_send(Event::SyncActivity(activity));
+                }
+                result
             }
             .await;
             let _ = done.send(Completion::Sync(result)).await;

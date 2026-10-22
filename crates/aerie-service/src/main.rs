@@ -38,6 +38,7 @@ struct Snapshot {
     connectivity: Option<String>,
     sync: Option<String>,
     storage: Option<String>,
+    activity: Option<String>,
 }
 
 impl Snapshot {
@@ -47,17 +48,24 @@ impl Snapshot {
             Event::UpToDate | Event::Offline | Event::Indexing { .. } => &mut self.connectivity,
             Event::Sync(_) => &mut self.sync,
             Event::Storage { .. } => &mut self.storage,
+            Event::SyncActivity(_) => &mut self.activity,
             _ => return,
         };
         *slot = Some(line.to_owned());
     }
 
     fn lines(&self) -> Vec<String> {
-        [&self.session, &self.connectivity, &self.sync, &self.storage]
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect()
+        [
+            &self.session,
+            &self.connectivity,
+            &self.sync,
+            &self.storage,
+            &self.activity,
+        ]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect()
     }
 }
 

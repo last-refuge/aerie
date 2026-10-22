@@ -40,7 +40,13 @@ pub fn build_window(app: &adw::Application) {
     let welcome = Welcome::new(engine.clone());
     let transfers = TransfersPage::new(engine.clone());
     let sync = SyncPage::new(engine.clone());
-    let split = browser.split_view(&transfers.root, &sync.root);
+    let activity = crate::activity_page::ActivityPage::new();
+    let split = browser.split_view(&transfers.root, &sync.root, &activity.root);
+    sync.view_activity.connect_clicked(glib::clone!(
+        #[weak]
+        browser,
+        move |_| browser.show_page("activity")
+    ));
 
     let stack = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::Crossfade)
@@ -143,6 +149,7 @@ pub fn build_window(app: &adw::Application) {
                         browser.set_sync_progress(Some(&progress));
                         browser.set_sync_activity(root);
                     }
+                    Event::SyncActivity(log) => activity.show(log),
                     Event::Sync(state) => {
                         if state != crate::engine::SyncState::Syncing {
                             browser.set_sync_activity(None);
@@ -395,6 +402,7 @@ fn handle_event(
         Event::TransfersChanged
         | Event::TransferProgress { .. }
         | Event::SyncProgress { .. }
+        | Event::SyncActivity(_)
         | Event::Sync(_)
         | Event::ConflictKept(_) => {}
         Event::NeedsWriteAccess => {
@@ -1311,15 +1319,19 @@ impl Browser {
     }
 
     /// Shows the Transfers or Sync page, selecting its row in the sidebar.
+    /// Shows the Transfers, Sync or Activity page, selecting its row in the sidebar.
     fn show_page(&self, page: &str) {
-        let row = if page == "sync" {
-            &self.sync_row
-        } else {
-            &self.transfers_row
-        };
-        row.set_visible(true);
         self.drives_list.unselect_all();
-        self.places.select_row(Some(row));
+        match page {
+            "sync" | "activity" => {
+                self.sync_row.set_visible(true);
+                self.places.select_row(Some(&self.sync_row));
+            }
+            _ => {
+                self.transfers_row.set_visible(true);
+                self.places.select_row(Some(&self.transfers_row));
+            }
+        }
         self.pages.set_visible_child_name(page);
     }
 
@@ -1471,6 +1483,7 @@ impl Browser {
         self: &Rc<Self>,
         transfers: &gtk::Widget,
         sync: &gtk::Widget,
+        activity: &gtk::Widget,
     ) -> adw::NavigationSplitView {
         let content = adw::ToolbarView::new();
         let header = adw::HeaderBar::builder()
@@ -1529,6 +1542,7 @@ impl Browser {
         self.pages.add_named(&content, Some("files"));
         self.pages.add_named(transfers, Some("transfers"));
         self.pages.add_named(sync, Some("sync"));
+        self.pages.add_named(activity, Some("activity"));
 
         let sidebar = gtk::Overlay::builder().child(&self.sidebar()).build();
         let split = adw::NavigationSplitView::builder()
@@ -1585,9 +1599,23 @@ impl Browser {
         let status = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(12)
-            .css_classes(["sync-status", "card"])
+            .css_classes(["sync-status", "card", "activatable"])
             .accessible_role(gtk::AccessibleRole::Status)
+            .tooltip_text("Show sync activity")
+            .cursor(&gtk::gdk::Cursor::from_name("pointer", None).expect("a standard cursor"))
             .build();
+        // The status card opens the activity log.
+        let open = gtk::GestureClick::new();
+        open.connect_released(glib::clone!(
+            #[weak(rename_to = browser)]
+            self,
+            move |_, _, _, _| {
+                if browser.is_drive() {
+                    browser.show_page("activity");
+                }
+            }
+        ));
+        status.add_controller(open);
         self.sync_progress.append(&self.sync_bar);
         self.sync_progress.append(&self.sync_doing);
         status.append(&summary);
@@ -1794,6 +1822,7 @@ impl Browser {
         });
         self.drives_filter
             .set_visible(drives.len() > FILTER_DRIVES_ABOVE);
+        self.drives_revealer.set_visible(!drives.is_empty());
         // Pinned drives come first, each group in name order.
         let pinned = crate::preferences::Settings::load().pinned_drives;
         let is_pinned = |drive: &FileEntry| pinned.iter().any(|id| id == drive.id.as_str());
