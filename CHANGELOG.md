@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2 beta
+
+- **Resume from the sidebar:** while sync is paused, the status card has a Resume button. "Sync Now" also resumes a paused sync instead of doing nothing.
+
 ## 0.5.1 beta
 
 - **Fixed a sync loop with macOS .DS_Store files:** a `.DS_Store` on Drive was downloaded, then hidden from the next scan, so every pass saw a conflict and uploaded another "conflicted copy". Names Aerie ignores locally (`.DS_Store` and its copies, `._*`, `Thumbs.db`, `desktop.ini`, editor temporaries) are now never synced in either direction.
