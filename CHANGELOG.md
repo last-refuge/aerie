@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 beta
+
+- **Sync activity:** click the status card in the sidebar, or Activity on the Sync page, to see every change in the current sync: what's happening now, what's up next, what needs attention, and what's done. Each change shows its file, folder and direction, with a tinted arrow for downloads and uploads, a trash can for removals, and a chip for its state. After a sync, it shows the last one's results.
+
 ## 0.4.8 beta
 
 - **Synced drives filter:** an All / Synced switch above the shared drives in the sidebar. Synced shows only drives with something syncing, the whole drive or a folder in it. All is the default, and Aerie remembers your choice.

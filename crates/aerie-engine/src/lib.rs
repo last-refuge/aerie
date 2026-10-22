@@ -15,10 +15,12 @@ use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
+pub mod activity;
 mod protocol;
 mod sync;
 pub mod transfers;
 
+pub use activity::{Activity, ActivityItem, ItemState, Way};
 pub use protocol::{Hello, PROTOCOL, socket_path};
 pub use sync::SyncState;
 
@@ -160,6 +162,8 @@ pub enum Event {
         verb: String,
         item: Option<String>,
     },
+    /// The latest sync pass with changes: what it planned and how each change went.
+    SyncActivity(Activity),
     /// Both versions of a file were kept; this is the path of Drive's copy.
     ConflictKept(PathBuf),
     TransferProgress {

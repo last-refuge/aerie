@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub use aerie_engine::{Command, Event, LocalFile, SyncState};
+pub use aerie_engine::{
+    Activity, ActivityItem, Command, Event, ItemState, LocalFile, SyncState, Way,
+};
 use aerie_engine::{Hello, PROTOCOL, socket_path};
 use async_channel::{Receiver, Sender};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

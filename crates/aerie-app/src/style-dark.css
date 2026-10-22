@@ -58,3 +58,11 @@
 .status-badge.good { --aerie-tone: #4ade80; }
 .status-badge.warning { --aerie-tone: #fbbf24; }
 .storage-bar.nearly-full progress { background-color: #fbbf24; }
+
+.activity-way.way-down { --aerie-way: #38bdf8; }
+.activity-way.way-up { --aerie-way: #a78bfa; }
+.activity-way.way-trash { --aerie-way: #f87171; }
+.activity-way.way-both { --aerie-way: #fbbf24; }
+.activity-state.kept { color: #fbbf24; }
+.activity-state.failed { color: #f87171; }
+.activity-done { color: #4ade80; }

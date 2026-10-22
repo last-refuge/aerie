@@ -1,6 +1,6 @@
 # Maintainer: Last Refuge <https://github.com/last-refuge>
 pkgname=aerie
-pkgver=0.4.8
+pkgver=0.5.0
 pkgrel=1
 pkgdesc="Google Drive for Linux"
 arch=('x86_64' 'aarch64')

@@ -115,6 +115,22 @@ pub enum Op {
 }
 
 impl Op {
+    /// Which way the step moves data, for the activity log.
+    pub fn direction(&self) -> Direction {
+        match self {
+            Self::CreateLocalDir { .. } | Self::Download { .. } | Self::MoveLocal { .. } => {
+                Direction::Down
+            }
+            Self::CreateRemoteDir { .. }
+            | Self::UploadNew { .. }
+            | Self::UploadReplace { .. }
+            | Self::MoveRemote { .. } => Direction::Up,
+            Self::TrashLocal { .. } | Self::TrashRemote { .. } => Direction::Trash,
+            Self::Conflict { .. } => Direction::Both,
+            Self::Forget { .. } => Direction::Bookkeeping,
+        }
+    }
+
     /// What the step does, for progress shown to the user.
     pub fn verb(&self) -> &'static str {
         match self {
@@ -147,4 +163,19 @@ impl Op {
             Self::Forget { .. } => None,
         }
     }
+}
+
+/// Which way a sync step moves data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    /// From Drive to this computer.
+    Down,
+    /// From this computer to Drive.
+    Up,
+    /// To the trash on one side.
+    Trash,
+    /// Both versions kept.
+    Both,
+    /// Internal record keeping, not shown.
+    Bookkeeping,
 }

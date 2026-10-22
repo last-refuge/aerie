@@ -15,6 +15,8 @@ use crate::engine::{Command, Engine, SyncState};
 
 pub struct SyncPage {
     pub root: gtk::Widget,
+    /// Opens the activity log; wired by the window.
+    pub view_activity: gtk::Button,
     engine: Rc<Engine>,
     stack: gtk::Stack,
     // Setup.
@@ -90,7 +92,13 @@ impl SyncPage {
             .css_classes(["sync-bar"])
             .visible(false)
             .build();
+        let view_activity = gtk::Button::builder()
+            .label("Activity")
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
         status_row.add_suffix(&progress);
+        status_row.add_suffix(&view_activity);
         status_row.add_suffix(&sync_now);
         let held_row = adw::ActionRow::builder()
             .title("Deletions paused")
@@ -150,6 +158,7 @@ impl SyncPage {
         view.set_content(Some(&stack));
 
         let page = Rc::new(Self {
+            view_activity,
             root: view.upcast(),
             engine,
             stack,
