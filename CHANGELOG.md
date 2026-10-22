@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 beta
+
+- **Fixed a sync loop with macOS .DS_Store files:** a `.DS_Store` on Drive was downloaded, then hidden from the next scan, so every pass saw a conflict and uploaded another "conflicted copy". Names Aerie ignores locally (`.DS_Store` and its copies, `._*`, `Thumbs.db`, `desktop.ini`, editor temporaries) are now never synced in either direction.
+
 ## 0.5.0 beta
 
 - **Sync activity:** click the status card in the sidebar, or Activity on the Sync page, to see every change in the current sync: what's happening now, what's up next, what needs attention, and what's done. Each change shows its file, folder and direction, with a tinted arrow for downloads and uploads, a trash can for removals, and a chip for its state. After a sync, it shows the last one's results.

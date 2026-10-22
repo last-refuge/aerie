@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.5.1" date="2026-10-22">
+      <description>
+        <p>Fixes a sync loop caused by macOS .DS_Store files on Drive.</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-10-22">
       <description>
         <p>A sync activity view: every change in the current sync, grouped by where it stands.</p>
