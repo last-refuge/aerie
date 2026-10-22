@@ -407,7 +407,17 @@ impl Worker {
             Command::PauseSync => self.set_sync_paused(true),
             Command::ResumeSync => self.set_sync_paused(false),
             Command::StopSync => self.stop_sync(),
-            Command::SyncNow => self.sync_due = true,
+            // Asking to sync now is also asking to stop being paused.
+            Command::SyncNow => {
+                if self
+                    .sync_settings()
+                    .is_some_and(|(_, settings)| settings.paused)
+                {
+                    self.set_sync_paused(false);
+                } else {
+                    self.sync_due = true;
+                }
+            }
             Command::AllowHeldDeletions => {
                 self.deletions = aerie_sync::cycle::Deletions::Allow;
                 self.sync_due = true;

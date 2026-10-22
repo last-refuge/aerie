@@ -24,6 +24,11 @@
     <internet>always</internet>
   </requires>
   <releases>
+    <release version="0.5.2" date="2026-10-22">
+      <description>
+        <p>Resume a paused sync from the sidebar, or with Sync Now.</p>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-10-22">
       <description>
         <p>Fixes a sync loop caused by macOS .DS_Store files on Drive.</p>
